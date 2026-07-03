@@ -1,0 +1,6 @@
+{
+  "name": "Dominion City Apapa Church Management System",
+  "description": "Church management system for Dominion City Apapa, Lagos, Nigeria featuring attendance tracking, departmental rolls, Care Center (CMD) reporting, and financial accountability with Supabase connection.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
