@@ -76,7 +76,7 @@ export default function FinanceView({ activeProfile, satelliteChurches, careCent
         setFormData(prev => ({ ...prev, category_id: filteredCats[0].id }));
       }
     } catch (err: any) {
-      console.error('[FINANCE LOAD ERROR]', err);
+      console.warn('[FINANCE LOAD ERROR]', err);
       setErrorMsg(err?.message || 'Failed to retrieve ledger data. Please check network connection.');
     } finally {
       setLoading(false);

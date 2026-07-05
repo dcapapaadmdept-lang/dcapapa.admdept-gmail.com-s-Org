@@ -62,7 +62,7 @@ export default function UserManagementView({
         const fetched = await api.getProfiles(activeProfile);
         setProfiles(fetched || []);
       } catch (err: any) {
-        console.error('[USER_MGMT] Failed loading profiles:', err);
+        console.warn('[USER_MGMT] Failed loading profiles:', err);
         setErrorCount(err?.message || 'Permission restriction querying profiles registry.');
         setProfiles([]);
       } finally {

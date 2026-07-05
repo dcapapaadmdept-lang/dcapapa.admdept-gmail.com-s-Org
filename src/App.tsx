@@ -2,10 +2,8 @@ import React, { useState, useEffect } from 'react';
 import {
   api,
   getSupabaseConfig,
-  getActiveProfileId,
   getSupabaseClient,
-  resetSupabaseConfig,
-  dbSim
+  resetSupabaseConfig
 } from './supabaseClient';
 import {
   Profile,
@@ -375,7 +373,7 @@ export default function App() {
         null
       );
     } catch (err: any) {
-      console.error('[SYNC SYSTEM GRACE FAILED] Error caught inside sync router:', err);
+      console.warn('[SYNC SYSTEM GRACE FAILED] Error caught inside sync router:', err);
       const errMsg = err?.message || err?.details || JSON.stringify(err) || 'CORS network block or database connection refused';
       setStartupError(`Database sync failed: ${errMsg}`);
       
@@ -555,31 +553,7 @@ export default function App() {
         const { isConfigured } = configInfo;
         const supabase = getSupabaseClient();
 
-        // Restoration of local offline sandbox session
-        const offlineProfileId = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('dccms_offline_profile_id') : null;
-        const isNetworkSuspended = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('dccms_network_suspended') === 'true' : false;
-
-        if (isNetworkSuspended && offlineProfileId) {
-          console.log('[BOOTSTRAP] Restoring active offline demo session for profile ID:', offlineProfileId);
-          const profile = dbSim.profiles.getById(offlineProfileId);
-          if (profile) {
-            const simulatedUser = {
-              id: profile.id,
-              email: profile.email,
-              isOffline: true,
-              user_metadata: {
-                full_name: profile.full_name,
-                role: profile.role
-              }
-            };
-            setAuthenticatedUser(simulatedUser);
-            setActiveProfile(profile);
-            setShowAuthGate(false);
-            await syncDatabaseTables(profile);
-            setLoading(false);
-            return;
-          }
-        }
+        // No offline session restoration anymore - strict live mode only
 
         if (isConfigured && supabase) {
           // 1. Load authenticated user first (Requirement 3)
@@ -649,7 +623,7 @@ export default function App() {
         }
 
       } catch (err: any) {
-        console.error('[CRITICAL SCHEMATIC BOOT ALERT] Secure database initialization aborted:', err);
+        console.warn('[CRITICAL SCHEMATIC BOOT ALERT] Secure database initialization aborted:', err);
         setStartupError("Unable to connect to the church database.");
         setMembersQueryError("Unable to connect to the church database.");
         setAuthenticatedUser(null);

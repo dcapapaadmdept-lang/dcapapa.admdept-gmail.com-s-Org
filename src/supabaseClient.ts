@@ -14,21 +14,6 @@ import {
   Finance,
   LeaderWorkerAttendance,
 } from './types';
-import {
-  INITIAL_DEPARTMENTS,
-  INITIAL_CARE_CENTERS,
-  INITIAL_SATELLITE_CHURCHES,
-  INITIAL_PROFILES,
-  INITIAL_MEMBERS,
-  INITIAL_MEMBER_ATTENDANCE,
-  INITIAL_LEADER_WORKER_ATTENDANCE,
-  INITIAL_DEPARTMENT_ATTENDANCE,
-  INITIAL_CMD_REPORTS,
-  INITIAL_SATELLITE_REPORTS,
-  INITIAL_CARE_CENTER_REPORTS,
-  INITIAL_FINANCES,
-  INITIAL_FINANCE_CATEGORIES,
-} from './data';
 
 // Local storage key names
 const LS_KEYS = {
@@ -51,42 +36,17 @@ const LS_KEYS = {
 };
 
 // Keep track of runtime network failure state for safe session downgrade (anti-crash / CORS safety)
-let isNetworkSuspended = (typeof sessionStorage !== 'undefined' && sessionStorage.getItem('dccms_network_suspended') === 'true');
+const isNetworkSuspended = false;
 let globalSupabase: SupabaseClient | null = null;
 let currentUrl = '';
 let currentKey = '';
 
-// Automatically synchronize network status to sessionStorage to persist offline fallback across reloads
-if (typeof setInterval !== 'undefined') {
-  setInterval(() => {
-    if (typeof sessionStorage !== 'undefined') {
-      if (isNetworkSuspended) {
-        if (sessionStorage.getItem('dccms_network_suspended') !== 'true') {
-          sessionStorage.setItem('dccms_network_suspended', 'true');
-        }
-      } else {
-        if (sessionStorage.getItem('dccms_network_suspended') === 'true') {
-          sessionStorage.removeItem('dccms_network_suspended');
-        }
-      }
-    }
-  }, 100);
-}
-
 export const suspendNetworkAndUseOffline = () => {
   console.warn('[SUPABASE SECURITY AUDIT] Network suspension request denied. DCCMS is configured to run in strict production mode.');
-  isNetworkSuspended = true;
-  if (typeof sessionStorage !== 'undefined') {
-    sessionStorage.setItem('dccms_network_suspended', 'true');
-  }
 };
 
 export const resumeNetwork = () => {
   console.log('[SUPABASE SECURITY AUDIT] Network suspension cleared.');
-  isNetworkSuspended = false;
-  if (typeof sessionStorage !== 'undefined') {
-    sessionStorage.removeItem('dccms_network_suspended');
-  }
 };
 
 // Initialize environment variables or localStorage values
@@ -198,14 +158,14 @@ export const getSupabaseClient = (): SupabaseClient | null => {
       currentUrl = url;
       currentKey = key;
     } catch (error) {
-      console.error('[SUPABASE ENGINE ERROR] Reconnection script thrown error:', error);
+      console.warn('[SUPABASE ENGINE ERROR] Reconnection script thrown error:', error);
       globalSupabase = null;
     }
   }
   return globalSupabase;
 };
 
-// Safe Wrapper to intercept CORS / generic network blocks and degrade automatically to simulated data layer
+// Safe Wrapper to execute queries with pure Supabase client
 export const executeRawQueryWithFallback = async <T,>(queryPromise: any): Promise<T[]> => {
   try {
     const res = await queryPromise;
@@ -217,60 +177,21 @@ export const executeRawQueryWithFallback = async <T,>(queryPromise: any): Promis
     }
     return (res && Array.isArray(res.data) ? res.data : (res && res.data ? [res.data] as any : [])) as T[];
   } catch (err: any) {
-    // Set network suspension immediately to avoid cascading parallel connection attempts
-    isNetworkSuspended = true;
-    if (typeof sessionStorage !== 'undefined') {
-      sessionStorage.setItem('dccms_network_suspended', 'true');
-    }
-    console.warn('[SUPABASE CORRUPT NETWORK HOOK] Intercepted CORS / Network offline exception:', err);
-    throw new Error("Unable to connect to the church database.");
+    console.warn('[SUPABASE DIRECT FETCH FAULT]', err);
+    throw new Error(err?.message || "Unable to connect to the church database.");
   }
 };
 
 // Trigger compilation and load initial state
 getSupabaseClient();
 
-// LOCAL DATABASE ENGINE (Fully-functional simulation)
-const getLocalData = <T>(key: string, initial: T[]): T[] => {
-  const data = localStorage.getItem(key);
-  if (!data) {
-    localStorage.setItem(key, JSON.stringify(initial));
-    return initial;
-  }
-  try {
-    return JSON.parse(data);
-  } catch (e) {
-    return initial;
-  }
-};
-
-const setLocalData = <T>(key: string, data: T[]) => {
-  localStorage.setItem(key, JSON.stringify(data));
-};
-
-// Initialization helper to populate local store if empty
+// LOCAL DATABASE ENGINE (Deactivated in strict Live Mode)
 export const initializeOfflineDatabase = () => {
-  getLocalData(LS_KEYS.DEPARTMENTS, INITIAL_DEPARTMENTS);
-  getLocalData(LS_KEYS.CARE_CENTERS, INITIAL_CARE_CENTERS);
-  getLocalData(LS_KEYS.SATELLITE_CHURCHES, INITIAL_SATELLITE_CHURCHES);
-  getLocalData(LS_KEYS.PROFILES, INITIAL_PROFILES);
-  getLocalData(LS_KEYS.MEMBERS, INITIAL_MEMBERS);
-  getLocalData(LS_KEYS.MEMBER_ATTENDANCE, INITIAL_MEMBER_ATTENDANCE);
-  getLocalData(LS_KEYS.LEADER_WORKER_ATTENDANCE, INITIAL_LEADER_WORKER_ATTENDANCE);
-  getLocalData(LS_KEYS.DEPARTMENT_ATTENDANCE, INITIAL_DEPARTMENT_ATTENDANCE);
-  getLocalData(LS_KEYS.CMD_REPORTS, INITIAL_CMD_REPORTS);
-  getLocalData(LS_KEYS.SATELLITE_REPORTS, INITIAL_SATELLITE_REPORTS);
-  getLocalData(LS_KEYS.CARE_CENTER_REPORTS, INITIAL_CARE_CENTER_REPORTS);
-  getLocalData(LS_KEYS.FINANCES, INITIAL_FINANCES);
-  getLocalData(LS_KEYS.FINANCE_CATEGORIES, INITIAL_FINANCE_CATEGORIES);
-  if (!localStorage.getItem(LS_KEYS.ACTIVE_PROFILE_ID)) {
-    localStorage.setItem(LS_KEYS.ACTIVE_PROFILE_ID, 'prof-admin'); // Default to Super Admin profile
-  }
+  // Pure live mode - no local offline database initialization
 };
 
-// Get the current active user profile for client-side simulator
 export const getActiveProfileId = (): string => {
-  return localStorage.getItem(LS_KEYS.ACTIVE_PROFILE_ID) || 'prof-admin';
+  return localStorage.getItem(LS_KEYS.ACTIVE_PROFILE_ID) || '';
 };
 
 export const setActiveProfileId = (id: string) => {
@@ -279,971 +200,416 @@ export const setActiveProfileId = (id: string) => {
 };
 
 // SIMULATED DATABASE REPOSITORIES
-export const dbSim = {
-  profiles: {
-    getAll: (): Profile[] => getLocalData(LS_KEYS.PROFILES, INITIAL_PROFILES),
-    getById: (id: string): Profile | undefined => dbSim.profiles.getAll().find(p => p.id === id),
-    upsert: (profile: Profile) => {
-      const all = dbSim.profiles.getAll();
-      const idx = all.findIndex(p => p.id === profile.id);
-      if (idx >= 0) all[idx] = profile;
-      else all.push(profile);
-      setLocalData(LS_KEYS.PROFILES, all);
-    },
-    getByEmail: (email: string): Profile | undefined => {
-      if (!email) return undefined;
-      return dbSim.profiles.getAll().find(p => p.email && p.email.toLowerCase() === email.toLowerCase());
-    }
-  },
-  members: {
-    getAll: (): Member[] => getLocalData(LS_KEYS.MEMBERS, INITIAL_MEMBERS),
-    save: (member: Member) => {
-      const all = dbSim.members.getAll();
-      const idx = all.findIndex(m => m.id === member.id);
-      if (idx >= 0) all[idx] = member;
-      else all.push(member);
-      setLocalData(LS_KEYS.MEMBERS, all);
-    },
-    delete: (id: string) => {
-      const filtered = dbSim.members.getAll().filter(m => m.id !== id);
-      setLocalData(LS_KEYS.MEMBERS, filtered);
-    }
-  },
-  departments: {
-    getAll: (): Department[] => getLocalData(LS_KEYS.DEPARTMENTS, INITIAL_DEPARTMENTS),
-    save: (dept: Department) => {
-      const all = dbSim.departments.getAll();
-      const idx = all.findIndex(d => d.id === dept.id);
-      if (idx >= 0) all[idx] = dept;
-      else all.push(dept);
-      setLocalData(LS_KEYS.DEPARTMENTS, all);
-    },
-    delete: (id: string) => {
-      const filtered = dbSim.departments.getAll().filter(d => d.id !== id);
-      setLocalData(LS_KEYS.DEPARTMENTS, filtered);
-    }
-  },
-  careCenters: {
-    getAll: (): CareCenter[] => getLocalData(LS_KEYS.CARE_CENTERS, INITIAL_CARE_CENTERS),
-    save: (center: CareCenter) => {
-      const all = dbSim.careCenters.getAll();
-      const idx = all.findIndex(c => c.id === center.id);
-      if (idx >= 0) all[idx] = center;
-      else all.push(center);
-      setLocalData(LS_KEYS.CARE_CENTERS, all);
-    },
-    delete: (id: string) => {
-      const filtered = dbSim.careCenters.getAll().filter(c => c.id !== id);
-      setLocalData(LS_KEYS.CARE_CENTERS, filtered);
-    }
-  },
-  satelliteChurches: {
-    getAll: (): SatelliteChurch[] => getLocalData(LS_KEYS.SATELLITE_CHURCHES, INITIAL_SATELLITE_CHURCHES),
-    save: (church: SatelliteChurch) => {
-      const all = dbSim.satelliteChurches.getAll();
-      const idx = all.findIndex(c => c.id === church.id);
-      if (idx >= 0) all[idx] = church;
-      else all.push(church);
-      setLocalData(LS_KEYS.SATELLITE_CHURCHES, all);
-    },
-    delete: (id: string) => {
-      const filtered = dbSim.satelliteChurches.getAll().filter(c => c.id !== id);
-      setLocalData(LS_KEYS.SATELLITE_CHURCHES, filtered);
-    }
-  },
-  memberAttendance: {
-    getAll: (): MemberAttendance[] => getLocalData(LS_KEYS.MEMBER_ATTENDANCE, INITIAL_MEMBER_ATTENDANCE),
-    save: (record: MemberAttendance) => {
-      const all = dbSim.memberAttendance.getAll();
-      const idx = all.findIndex(r => r.id === record.id);
-      if (idx >= 0) all[idx] = record;
-      else all.push(record);
-      setLocalData(LS_KEYS.MEMBER_ATTENDANCE, all);
-    },
-    delete: (id: string) => {
-      const filtered = dbSim.memberAttendance.getAll().filter(r => r.id !== id);
-      setLocalData(LS_KEYS.MEMBER_ATTENDANCE, filtered);
-    }
-  },
-  leaderWorkerAttendance: {
-    getAll: (): LeaderWorkerAttendance[] => getLocalData(LS_KEYS.LEADER_WORKER_ATTENDANCE, INITIAL_LEADER_WORKER_ATTENDANCE),
-    save: (record: LeaderWorkerAttendance) => {
-      const all = dbSim.leaderWorkerAttendance.getAll();
-      const idx = all.findIndex(r => r.id === record.id);
-      if (idx >= 0) all[idx] = record;
-      else all.push(record);
-      setLocalData(LS_KEYS.LEADER_WORKER_ATTENDANCE, all);
-    },
-    saveBulk: (records: LeaderWorkerAttendance[]) => {
-      const all = dbSim.leaderWorkerAttendance.getAll();
-      records.forEach(record => {
-        const idx = all.findIndex(r => r.id === record.id);
-        if (idx >= 0) all[idx] = record;
-        else all.push(record);
-      });
-      setLocalData(LS_KEYS.LEADER_WORKER_ATTENDANCE, all);
-    },
-    delete: (id: string) => {
-      const filtered = dbSim.leaderWorkerAttendance.getAll().filter(r => r.id !== id);
-      setLocalData(LS_KEYS.LEADER_WORKER_ATTENDANCE, filtered);
-    }
-  },
-  departmentAttendance: {
-    getAll: (): DepartmentAttendance[] => getLocalData(LS_KEYS.DEPARTMENT_ATTENDANCE, INITIAL_DEPARTMENT_ATTENDANCE),
-    save: (record: DepartmentAttendance) => {
-      const all = dbSim.departmentAttendance.getAll();
-      const idx = all.findIndex(r => r.id === record.id);
-      if (idx >= 0) all[idx] = record;
-      else all.push(record);
-      setLocalData(LS_KEYS.DEPARTMENT_ATTENDANCE, all);
-    },
-    saveBulk: (records: DepartmentAttendance[]) => {
-      const all = dbSim.departmentAttendance.getAll();
-      records.forEach(record => {
-        const idx = all.findIndex(r => r.id === record.id);
-        if (idx >= 0) all[idx] = record;
-        else all.push(record);
-      });
-      setLocalData(LS_KEYS.DEPARTMENT_ATTENDANCE, all);
-    },
-    delete: (id: string) => {
-      const filtered = dbSim.departmentAttendance.getAll().filter(r => r.id !== id);
-      setLocalData(LS_KEYS.DEPARTMENT_ATTENDANCE, filtered);
-    }
-  },
-  cmdReports: {
-    getAll: (): CmdReport[] => getLocalData(LS_KEYS.CMD_REPORTS, INITIAL_CMD_REPORTS),
-    save: (report: CmdReport) => {
-      const all = dbSim.cmdReports.getAll();
-      const idx = all.findIndex(r => r.id === report.id);
-      if (idx >= 0) all[idx] = report;
-      else all.push(report);
-      setLocalData(LS_KEYS.CMD_REPORTS, all);
-    },
-    delete: (id: string) => {
-      const filtered = dbSim.cmdReports.getAll().filter(r => r.id !== id);
-      setLocalData(LS_KEYS.CMD_REPORTS, filtered);
-    }
-  },
-  satelliteReports: {
-    getAll: (): SatelliteReport[] => getLocalData(LS_KEYS.SATELLITE_REPORTS, INITIAL_SATELLITE_REPORTS),
-    save: (report: SatelliteReport) => {
-      const all = dbSim.satelliteReports.getAll();
-      const idx = all.findIndex(r => r.id === report.id);
-      if (idx >= 0) all[idx] = report;
-      else all.push(report);
-      setLocalData(LS_KEYS.SATELLITE_REPORTS, all);
-    },
-    delete: (id: string) => {
-      const filtered = dbSim.satelliteReports.getAll().filter(r => r.id !== id);
-      setLocalData(LS_KEYS.SATELLITE_REPORTS, filtered);
-    }
-  },
-  careCenterReports: {
-    getAll: (): CareCenterReport[] => getLocalData(LS_KEYS.CARE_CENTER_REPORTS, INITIAL_CARE_CENTER_REPORTS),
-    save: (report: CareCenterReport) => {
-      const all = dbSim.careCenterReports.getAll();
-      const idx = all.findIndex(r => r.id === report.id);
-      if (idx >= 0) all[idx] = report;
-      else all.push(report);
-      setLocalData(LS_KEYS.CARE_CENTER_REPORTS, all);
-    },
-    delete: (id: string) => {
-      const filtered = dbSim.careCenterReports.getAll().filter(r => r.id !== id);
-      setLocalData(LS_KEYS.CARE_CENTER_REPORTS, filtered);
-    }
-  },
-  finances: {
-    getAll: (): Finance[] => getLocalData(LS_KEYS.FINANCES, INITIAL_FINANCES),
-    save: (record: Finance) => {
-      const all = dbSim.finances.getAll();
-      const idx = all.findIndex(r => r.id === record.id);
-      if (idx >= 0) all[idx] = record;
-      else all.push(record);
-      setLocalData(LS_KEYS.FINANCES, all);
-    },
-    delete: (id: string) => {
-      const filtered = dbSim.finances.getAll().filter(r => r.id !== id);
-      setLocalData(LS_KEYS.FINANCES, filtered);
-    }
-  },
-  financeCategories: {
-    getAll: (): any[] => getLocalData(LS_KEYS.FINANCE_CATEGORIES, INITIAL_FINANCE_CATEGORIES),
-    save: (cat: any) => {
-      const all = dbSim.financeCategories.getAll();
-      const idx = all.findIndex(c => c.id === cat.id);
-      if (idx >= 0) all[idx] = cat;
-      else all.push(cat);
-      setLocalData(LS_KEYS.FINANCE_CATEGORIES, all);
-    }
-  }
-};
+export const dbSim: any = {};
 
 // UNIFIED API BRIDGE: Swaps between Live Supabase and Simulated Engine with integrated RLS logic
 // RLS simulation applies logic transparently so that the front-end code remains clean and uniform.
 export const api = {
   getProfiles: async (activeProfile: Profile): Promise<Profile[]> => {
-    const supabase = !isNetworkSuspended ? getSupabaseClient() : null;
-    if (supabase) {
-      try {
-        return await executeRawQueryWithFallback<Profile>(supabase.from('profiles').select('*'));
-      } catch (err) {
-        console.warn('[SUPABASE FALLBACK] getProfiles failed. Downgrading to offline storage:', err);
-        isNetworkSuspended = true;
-      }
-    }
-    return dbSim.profiles.getAll();
+    const supabase = getSupabaseClient();
+    if (!supabase) return [];
+    const { data, error } = await supabase.from('profiles').select('*');
+    if (error) throw error;
+    return data || [];
   },
 
   updateProfile: async (profile: Profile): Promise<void> => {
-    const supabase = !isNetworkSuspended ? getSupabaseClient() : null;
-    if (supabase) {
-      try {
-        const { error } = await supabase.from('profiles').upsert(profile);
-        if (error) throw error;
-        dbSim.profiles.upsert(profile);
-        return;
-      } catch (err) {
-        console.warn('[SUPABASE FALLBACK] updateProfile failed. Saving to offline storage:', err);
-        isNetworkSuspended = true;
-      }
-    }
-    dbSim.profiles.upsert(profile);
+    const supabase = getSupabaseClient();
+    if (!supabase) throw new Error("Supabase is not configured.");
+    const { error } = await supabase.from('profiles').upsert(profile);
+    if (error) throw error;
   },
 
   getMembers: async (activeProfile: Profile): Promise<Member[]> => {
-    const supabase = !isNetworkSuspended ? getSupabaseClient() : null;
-    if (supabase) {
-      try {
-        let query = supabase.from('members').select('*');
-        const role = activeProfile?.role;
-        if (['Satellite Church Admin', 'satellite_admin', 'Satellite Admin'].includes(role || '') && activeProfile?.satellite_church_id) {
-          query = query.eq('satellite_church_id', activeProfile.satellite_church_id);
-        } else if (role === 'Care Pastor' && activeProfile?.care_center_id) {
-          query = query.eq('care_center_id', activeProfile.care_center_id);
-        } else if (['CMD', 'Church Ministry Director'].includes(role || '') && activeProfile?.assigned_cmd_name) {
-          // Fetch assigned care center ids
-          const { data: cData } = await supabase.from('care_centers').select('id').ilike('cmd_name', `%${activeProfile.assigned_cmd_name}%`);
-          if (cData && cData.length > 0) {
-            const ids = cData.map(c => c.id);
-            query = query.in('care_center_id', ids);
-          } else {
-            query = query.eq('care_center_id', 'none-matching-id');
-          }
-        } else if (role === 'Department Head' && activeProfile?.department_id) {
-          query = query.eq('department_id', activeProfile.department_id);
-        } else if (role === 'Member' && activeProfile?.email) {
-          query = query.eq('email', activeProfile.email);
-        }
-        return await executeRawQueryWithFallback<Member>(query.order('names', { ascending: true }));
-      } catch (err) {
-        console.warn('[SUPABASE FALLBACK] getMembers failed. Downgrading to offline storage:', err);
-        isNetworkSuspended = true;
-      }
-    }
-    
-    let all = dbSim.members.getAll();
+    const supabase = getSupabaseClient();
+    if (!supabase) return [];
+    let query = supabase.from('members').select('*');
     const role = activeProfile?.role;
     if (['Satellite Church Admin', 'satellite_admin', 'Satellite Admin'].includes(role || '') && activeProfile?.satellite_church_id) {
-      all = all.filter(m => m.satellite_church_id === activeProfile.satellite_church_id);
+      query = query.eq('satellite_church_id', activeProfile.satellite_church_id);
     } else if (role === 'Care Pastor' && activeProfile?.care_center_id) {
-      all = all.filter(m => m.care_center_id === activeProfile.care_center_id);
+      query = query.eq('care_center_id', activeProfile.care_center_id);
     } else if (['CMD', 'Church Ministry Director'].includes(role || '') && activeProfile?.assigned_cmd_name) {
-      const assignedCenters = dbSim.careCenters.getAll().filter(c => c.cmd_name && c.cmd_name.toLowerCase().includes(activeProfile.assigned_cmd_name!.toLowerCase()));
-      const assignedIds = assignedCenters.map(c => c.id);
-      all = all.filter(m => m.care_center_id && assignedIds.includes(m.care_center_id));
+      const { data: cData } = await supabase.from('care_centers').select('id').ilike('cmd_name', `%${activeProfile.assigned_cmd_name}%`);
+      if (cData && cData.length > 0) {
+        const ids = cData.map(c => c.id);
+        query = query.in('care_center_id', ids);
+      } else {
+        query = query.eq('care_center_id', 'none-matching-id');
+      }
     } else if (role === 'Department Head' && activeProfile?.department_id) {
-      all = all.filter(m => m.department_id === activeProfile.department_id);
+      query = query.eq('department_id', activeProfile.department_id);
     } else if (role === 'Member' && activeProfile?.email) {
-      all = all.filter(m => m.email && m.email.toLowerCase() === activeProfile.email.toLowerCase());
+      query = query.eq('email', activeProfile.email);
     }
-    return all.sort((a, b) => (a.names || '').localeCompare(b.names || ''));
+    const { data, error } = await query.order('names', { ascending: true });
+    if (error) throw error;
+    return data || [];
   },
 
   saveMember: async (member: Member): Promise<void> => {
-    const supabase = !isNetworkSuspended ? getSupabaseClient() : null;
-    if (supabase) {
-      try {
-        const { error } = await supabase.from('members').upsert(member);
-        if (error) throw error;
-        dbSim.members.save(member);
-        return;
-      } catch (err) {
-        console.warn('[SUPABASE FALLBACK] saveMember failed. Saving offline:', err);
-        isNetworkSuspended = true;
-      }
-    }
-    dbSim.members.save(member);
+    const supabase = getSupabaseClient();
+    if (!supabase) throw new Error("Supabase is not configured.");
+    const { error } = await supabase.from('members').upsert(member);
+    if (error) throw error;
   },
 
   deleteMember: async (id: string): Promise<{ success: boolean; member_id: string; payload: any; supabase_response: any }> => {
-    const supabase = !isNetworkSuspended ? getSupabaseClient() : null;
-    if (supabase) {
-      try {
-        const deletePayload = { id, target_table: 'members' };
-        const cascadeResults: any = {};
+    const supabase = getSupabaseClient();
+    if (!supabase) throw new Error("Supabase is not configured.");
+    const deletePayload = { id, target_table: 'members' };
+    const cascadeResults: any = {};
 
-        try {
-          const res = await supabase.from('member_attendance').delete().eq('member_id', id);
-          cascadeResults.member_attendance = res;
-        } catch (e: any) {
-          console.warn('Could not clear member_attendance entries:', e);
-        }
-
-        try {
-          const res = await supabase.from('department_attendance').delete().eq('member_id', id);
-          cascadeResults.department_attendance = res;
-        } catch (e: any) {
-          console.warn('Could not clear department_attendance entries:', e);
-        }
-
-        try {
-          await supabase.from('department_members').delete().eq('member_id', id);
-        } catch (e) {
-          console.warn('Could not clear department_members links:', e);
-        }
-        try {
-          await supabase.from('cmd_members').delete().eq('member_id', id);
-        } catch (e) {
-          console.warn('Could not clear cmd_members links:', e);
-        }
-        try {
-          await supabase.from('satellite_members').delete().eq('member_id', id);
-        } catch (e) {
-          console.warn('Could not clear satellite_members links:', e);
-        }
-
-        const mainResult = await supabase.from('members').delete().eq('id', id);
-        if (mainResult.error) throw mainResult.error;
-
-        dbSim.members.delete(id);
-
-        return {
-          success: true,
-          member_id: id,
-          payload: deletePayload,
-          supabase_response: {
-            main_query_result: mainResult,
-            cascaded_queries: cascadeResults
-          }
-        };
-      } catch (err) {
-        console.warn('[SUPABASE FALLBACK] deleteMember failed. Deleting offline:', err);
-        isNetworkSuspended = true;
-      }
+    try {
+      const res = await supabase.from('member_attendance').delete().eq('member_id', id);
+      cascadeResults.member_attendance = res;
+    } catch (e: any) {
+      console.warn('Could not clear member_attendance entries:', e);
     }
-    dbSim.members.delete(id);
+
+    try {
+      const res = await supabase.from('department_attendance').delete().eq('member_id', id);
+      cascadeResults.department_attendance = res;
+    } catch (e: any) {
+      console.warn('Could not clear department_attendance entries:', e);
+    }
+
+    try {
+      await supabase.from('department_members').delete().eq('member_id', id);
+    } catch (e) {
+      console.warn('Could not clear department_members links:', e);
+    }
+    try {
+      await supabase.from('cmd_members').delete().eq('member_id', id);
+    } catch (e) {
+      console.warn('Could not clear cmd_members links:', e);
+    }
+    try {
+      await supabase.from('satellite_members').delete().eq('member_id', id);
+    } catch (e) {
+      console.warn('Could not clear satellite_members links:', e);
+    }
+
+    const mainResult = await supabase.from('members').delete().eq('id', id);
+    if (mainResult.error) throw mainResult.error;
+
     return {
       success: true,
       member_id: id,
-      payload: { id, target_table: 'members' },
-      supabase_response: { offline: true }
+      payload: deletePayload,
+      supabase_response: {
+        main_query_result: mainResult,
+        cascaded_queries: cascadeResults
+      }
     };
   },
 
   getDepartments: async (activeProfile: Profile): Promise<Department[]> => {
-    const supabase = !isNetworkSuspended ? getSupabaseClient() : null;
-    if (supabase) {
-      try {
-        let query = supabase.from('departments').select('*');
-        if (activeProfile?.role === 'Department Head' && activeProfile?.department_id) {
-          query = query.eq('id', activeProfile.department_id);
-        }
-        return await executeRawQueryWithFallback<Department>(query);
-      } catch (err) {
-        console.warn('[SUPABASE FALLBACK] getDepartments failed. Downgrading offline:', err);
-        isNetworkSuspended = true;
-      }
-    }
-    let all = dbSim.departments.getAll();
+    const supabase = getSupabaseClient();
+    if (!supabase) return [];
+    let query = supabase.from('departments').select('*');
     if (activeProfile?.role === 'Department Head' && activeProfile?.department_id) {
-      all = all.filter(d => d.id === activeProfile.department_id);
+      query = query.eq('id', activeProfile.department_id);
     }
-    return all;
+    const { data, error } = await query;
+    if (error) throw error;
+    return data || [];
   },
 
   saveDepartment: async (dept: Department): Promise<void> => {
-    const supabase = !isNetworkSuspended ? getSupabaseClient() : null;
-    if (supabase) {
-      try {
-        const { error } = await supabase.from('departments').upsert(dept);
-        if (error) throw error;
-        dbSim.departments.save(dept);
-        return;
-      } catch (err) {
-        console.warn('[SUPABASE FALLBACK] saveDepartment failed. Saving offline:', err);
-        isNetworkSuspended = true;
-      }
-    }
-    dbSim.departments.save(dept);
+    const supabase = getSupabaseClient();
+    if (!supabase) throw new Error("Supabase is not configured.");
+    const { error } = await supabase.from('departments').upsert(dept);
+    if (error) throw error;
   },
 
   deleteDepartment: async (id: string): Promise<void> => {
-    const supabase = !isNetworkSuspended ? getSupabaseClient() : null;
-    if (supabase) {
-      try {
-        const { error } = await supabase.from('departments').delete().eq('id', id);
-        if (error) throw error;
-        dbSim.departments.delete(id);
-        return;
-      } catch (err) {
-        console.warn('[SUPABASE FALLBACK] deleteDepartment failed. Deleting offline:', err);
-        isNetworkSuspended = true;
-      }
-    }
-    dbSim.departments.delete(id);
+    const supabase = getSupabaseClient();
+    if (!supabase) throw new Error("Supabase is not configured.");
+    const { error } = await supabase.from('departments').delete().eq('id', id);
+    if (error) throw error;
   },
 
   getCareCenters: async (activeProfile: Profile): Promise<CareCenter[]> => {
-    const supabase = !isNetworkSuspended ? getSupabaseClient() : null;
-    if (supabase) {
-      try {
-        let query = supabase.from('care_centers').select('*');
-        if (activeProfile?.role === 'Care Pastor' && activeProfile?.care_center_id) {
-          query = query.eq('id', activeProfile.care_center_id);
-        } else if (['CMD', 'Church Ministry Director'].includes(activeProfile?.role || '') && activeProfile?.assigned_cmd_name) {
-          query = query.ilike('cmd_name', `%${activeProfile.assigned_cmd_name}%`);
-        }
-        return await executeRawQueryWithFallback<CareCenter>(query);
-      } catch (err) {
-        console.warn('[SUPABASE FALLBACK] getCareCenters failed. Downgrading offline:', err);
-        isNetworkSuspended = true;
-      }
-    }
-    let all = dbSim.careCenters.getAll();
+    const supabase = getSupabaseClient();
+    if (!supabase) return [];
+    let query = supabase.from('care_centers').select('*');
     if (activeProfile?.role === 'Care Pastor' && activeProfile?.care_center_id) {
-      all = all.filter(c => c.id === activeProfile.care_center_id);
+      query = query.eq('id', activeProfile.care_center_id);
     } else if (['CMD', 'Church Ministry Director'].includes(activeProfile?.role || '') && activeProfile?.assigned_cmd_name) {
-      all = all.filter(c => c.cmd_name && c.cmd_name.toLowerCase().includes(activeProfile.assigned_cmd_name!.toLowerCase()));
+      query = query.ilike('cmd_name', `%${activeProfile.assigned_cmd_name}%`);
     }
-    return all;
+    const { data, error } = await query;
+    if (error) throw error;
+    return data || [];
   },
 
   saveCareCenter: async (center: CareCenter): Promise<void> => {
-    const supabase = !isNetworkSuspended ? getSupabaseClient() : null;
-    if (supabase) {
-      try {
-        const { error } = await supabase.from('care_centers').upsert(center);
-        if (error) throw error;
-        dbSim.careCenters.save(center);
-        return;
-      } catch (err) {
-        console.warn('[SUPABASE FALLBACK] saveCareCenter failed. Saving offline:', err);
-        isNetworkSuspended = true;
-      }
-    }
-    dbSim.careCenters.save(center);
+    const supabase = getSupabaseClient();
+    if (!supabase) throw new Error("Supabase is not configured.");
+    const { error } = await supabase.from('care_centers').upsert(center);
+    if (error) throw error;
   },
 
   deleteCareCenter: async (id: string): Promise<void> => {
-    const supabase = !isNetworkSuspended ? getSupabaseClient() : null;
-    if (supabase) {
-      try {
-        const { error } = await supabase.from('care_centers').delete().eq('id', id);
-        if (error) throw error;
-        dbSim.careCenters.delete(id);
-        return;
-      } catch (err) {
-        console.warn('[SUPABASE FALLBACK] deleteCareCenter failed. Deleting offline:', err);
-        isNetworkSuspended = true;
-      }
-    }
-    dbSim.careCenters.delete(id);
+    const supabase = getSupabaseClient();
+    if (!supabase) throw new Error("Supabase is not configured.");
+    const { error } = await supabase.from('care_centers').delete().eq('id', id);
+    if (error) throw error;
   },
 
   getSatelliteChurches: async (activeProfile: Profile): Promise<SatelliteChurch[]> => {
-    const supabase = !isNetworkSuspended ? getSupabaseClient() : null;
-    if (supabase) {
-      try {
-        let query = supabase.from('satellite_churches').select('*');
-        if (['Satellite Church Admin', 'satellite_admin', 'Satellite Admin'].includes(activeProfile?.role || '') && activeProfile?.satellite_church_id) {
-          query = query.eq('id', activeProfile.satellite_church_id);
-        }
-        return await executeRawQueryWithFallback<SatelliteChurch>(query);
-      } catch (err) {
-        console.warn('[SUPABASE FALLBACK] getSatelliteChurches failed. Downgrading offline:', err);
-        isNetworkSuspended = true;
-      }
-    }
-    let all = dbSim.satelliteChurches.getAll();
+    const supabase = getSupabaseClient();
+    if (!supabase) return [];
+    let query = supabase.from('satellite_churches').select('*');
     if (['Satellite Church Admin', 'satellite_admin', 'Satellite Admin'].includes(activeProfile?.role || '') && activeProfile?.satellite_church_id) {
-      all = all.filter(c => c.id === activeProfile.satellite_church_id);
+      query = query.eq('id', activeProfile.satellite_church_id);
     }
-    return all;
+    const { data, error } = await query;
+    if (error) throw error;
+    return data || [];
   },
 
   saveSatelliteChurch: async (church: SatelliteChurch): Promise<void> => {
-    const supabase = !isNetworkSuspended ? getSupabaseClient() : null;
-    if (supabase) {
-      try {
-        const { error } = await supabase.from('satellite_churches').upsert(church);
-        if (error) throw error;
-        dbSim.satelliteChurches.save(church);
-        return;
-      } catch (err) {
-        console.warn('[SUPABASE FALLBACK] saveSatelliteChurch failed. Saving offline:', err);
-        isNetworkSuspended = true;
-      }
-    }
-    dbSim.satelliteChurches.save(church);
+    const supabase = getSupabaseClient();
+    if (!supabase) throw new Error("Supabase is not configured.");
+    const { error } = await supabase.from('satellite_churches').upsert(church);
+    if (error) throw error;
   },
 
   deleteSatelliteChurch: async (id: string): Promise<void> => {
-    const supabase = !isNetworkSuspended ? getSupabaseClient() : null;
-    if (supabase) {
-      try {
-        const { error } = await supabase.from('satellite_churches').delete().eq('id', id);
-        if (error) throw error;
-        dbSim.satelliteChurches.delete(id);
-        return;
-      } catch (err) {
-        console.warn('[SUPABASE FALLBACK] deleteSatelliteChurch failed. Deleting offline:', err);
-        isNetworkSuspended = true;
-      }
-    }
-    dbSim.satelliteChurches.delete(id);
+    const supabase = getSupabaseClient();
+    if (!supabase) throw new Error("Supabase is not configured.");
+    const { error } = await supabase.from('satellite_churches').delete().eq('id', id);
+    if (error) throw error;
   },
 
   getMemberAttendance: async (activeProfile: Profile): Promise<MemberAttendance[]> => {
-    const supabase = !isNetworkSuspended ? getSupabaseClient() : null;
-    if (supabase) {
-      try {
-        let query = supabase.from('member_attendance').select('*');
-        const role = activeProfile?.role;
-        if (['Satellite Church Admin', 'satellite_admin', 'Satellite Admin'].includes(role || '') && activeProfile?.satellite_church_id) {
-          query = query.eq('satellite_church_id', activeProfile.satellite_church_id);
-        } else if (role === 'Care Pastor' && activeProfile?.care_center_id) {
-          query = query.eq('care_center_id', activeProfile.care_center_id);
-        } else if (['CMD', 'Church Ministry Director'].includes(role || '') && activeProfile?.assigned_cmd_name) {
-          // Fetch assigned care center ids
-          const { data: cData } = await supabase.from('care_centers').select('id').ilike('cmd_name', `%${activeProfile.assigned_cmd_name}%`);
-          if (cData && cData.length > 0) {
-            const ids = cData.map(c => c.id);
-            query = query.in('care_center_id', ids);
-          } else {
-            query = query.eq('care_center_id', 'none-matching-id');
-          }
-        }
-        return await executeRawQueryWithFallback<MemberAttendance>(query);
-      } catch (err) {
-        console.warn('[SUPABASE FALLBACK] getMemberAttendance failed. Downgrading offline:', err);
-        isNetworkSuspended = true;
-      }
-    }
-    let all = dbSim.memberAttendance.getAll();
+    const supabase = getSupabaseClient();
+    if (!supabase) return [];
+    let query = supabase.from('member_attendance').select('*');
     const role = activeProfile?.role;
     if (['Satellite Church Admin', 'satellite_admin', 'Satellite Admin'].includes(role || '') && activeProfile?.satellite_church_id) {
-      all = all.filter(r => r.satellite_church_id === activeProfile.satellite_church_id);
+      query = query.eq('satellite_church_id', activeProfile.satellite_church_id);
     } else if (role === 'Care Pastor' && activeProfile?.care_center_id) {
-      all = all.filter(r => r.care_center_id === activeProfile.care_center_id);
+      query = query.eq('care_center_id', activeProfile.care_center_id);
     } else if (['CMD', 'Church Ministry Director'].includes(role || '') && activeProfile?.assigned_cmd_name) {
-      const assignedCenters = dbSim.careCenters.getAll().filter(c => c.cmd_name && c.cmd_name.toLowerCase().includes(activeProfile.assigned_cmd_name!.toLowerCase()));
-      const assignedIds = assignedCenters.map(c => c.id);
-      all = all.filter(r => r.care_center_id && assignedIds.includes(r.care_center_id));
+      const { data: cData } = await supabase.from('care_centers').select('id').ilike('cmd_name', `%${activeProfile.assigned_cmd_name}%`);
+      if (cData && cData.length > 0) {
+        query = query.in('care_center_id', cData.map(c => c.id));
+      } else {
+        query = query.eq('care_center_id', 'none-matching-id');
+      }
+    } else if (role === 'Department Head' && activeProfile?.department_id) {
+      query = query.eq('department_id', activeProfile.department_id);
+    } else if (role === 'Member' && activeProfile?.email) {
+      const { data: mData } = await supabase.from('members').select('id').eq('email', activeProfile.email);
+      if (mData && mData.length > 0) {
+        query = query.eq('member_id', mData[0].id);
+      } else {
+        query = query.eq('member_id', 'none-matching-id');
+      }
     }
-    return all;
+    const { data, error } = await query;
+    if (error) throw error;
+    return data || [];
   },
 
   saveMemberAttendance: async (record: MemberAttendance): Promise<void> => {
-    const supabase = !isNetworkSuspended ? getSupabaseClient() : null;
-    if (supabase) {
-      try {
-        const { error } = await supabase.from('member_attendance').upsert(record);
-        if (error) throw error;
-        dbSim.memberAttendance.save(record);
-        return;
-      } catch (err) {
-        console.warn('[SUPABASE FALLBACK] saveMemberAttendance failed. Saving offline:', err);
-        isNetworkSuspended = true;
-      }
-    }
-    dbSim.memberAttendance.save(record);
+    const supabase = getSupabaseClient();
+    if (!supabase) throw new Error("Supabase is not configured.");
+    const { error } = await supabase.from('member_attendance').upsert(record);
+    if (error) throw error;
   },
 
   deleteMemberAttendance: async (id: string): Promise<void> => {
-    const supabase = !isNetworkSuspended ? getSupabaseClient() : null;
-    if (supabase) {
-      try {
-        const { error } = await supabase.from('member_attendance').delete().eq('id', id);
-        if (error) throw error;
-        dbSim.memberAttendance.delete(id);
-        return;
-      } catch (err) {
-        console.warn('[SUPABASE FALLBACK] deleteMemberAttendance failed. Deleting offline:', err);
-        isNetworkSuspended = true;
-      }
-    }
-    dbSim.memberAttendance.delete(id);
+    const supabase = getSupabaseClient();
+    if (!supabase) throw new Error("Supabase is not configured.");
+    const { error } = await supabase.from('member_attendance').delete().eq('id', id);
+    if (error) throw error;
   },
 
   getLeaderWorkerAttendance: async (activeProfile: Profile): Promise<LeaderWorkerAttendance[]> => {
-    const supabase = !isNetworkSuspended ? getSupabaseClient() : null;
-    if (supabase) {
-      try {
-        let query = supabase.from('leader_worker_attendance').select('*');
-        const role = activeProfile?.role;
-        if (['Satellite Church Admin', 'satellite_admin', 'Satellite Admin'].includes(role || '') && activeProfile?.satellite_church_id) {
-          query = query.eq('satellite_church_id', activeProfile.satellite_church_id);
-        }
-        return await executeRawQueryWithFallback<LeaderWorkerAttendance>(query);
-      } catch (err) {
-        console.warn('[SUPABASE FALLBACK] getLeaderWorkerAttendance failed. Downgrading offline:', err);
-        isNetworkSuspended = true;
-      }
-    }
-    let all = dbSim.leaderWorkerAttendance.getAll();
+    const supabase = getSupabaseClient();
+    if (!supabase) return [];
+    let query = supabase.from('leader_worker_attendance').select('*');
     const role = activeProfile?.role;
     if (['Satellite Church Admin', 'satellite_admin', 'Satellite Admin'].includes(role || '') && activeProfile?.satellite_church_id) {
-      all = all.filter(r => r.satellite_church_id === activeProfile.satellite_church_id);
+      query = query.eq('satellite_church_id', activeProfile.satellite_church_id);
     }
-    return all;
+    const { data, error } = await query;
+    if (error) throw error;
+    return data || [];
   },
 
   saveLeaderWorkerAttendance: async (record: LeaderWorkerAttendance): Promise<void> => {
-    const supabase = !isNetworkSuspended ? getSupabaseClient() : null;
-    if (supabase) {
-      try {
-        const { error } = await supabase.from('leader_worker_attendance').upsert(record);
-        if (error) throw error;
-        dbSim.leaderWorkerAttendance.save(record);
-        return;
-      } catch (err) {
-        console.warn('[SUPABASE FALLBACK] saveLeaderWorkerAttendance failed. Saving offline:', err);
-        isNetworkSuspended = true;
-      }
-    }
-    dbSim.leaderWorkerAttendance.save(record);
+    const supabase = getSupabaseClient();
+    if (!supabase) throw new Error("Supabase is not configured.");
+    const { error } = await supabase.from('leader_worker_attendance').upsert(record);
+    if (error) throw error;
   },
 
   saveLeaderWorkerAttendanceBulk: async (records: LeaderWorkerAttendance[]): Promise<void> => {
-    const supabase = !isNetworkSuspended ? getSupabaseClient() : null;
-    if (supabase) {
-      try {
-        const { error } = await supabase.from('leader_worker_attendance').upsert(records);
-        if (error) throw error;
-        dbSim.leaderWorkerAttendance.saveBulk(records);
-        return;
-      } catch (err) {
-        console.warn('[SUPABASE FALLBACK] saveLeaderWorkerAttendanceBulk failed. Saving offline:', err);
-        isNetworkSuspended = true;
-      }
-    }
-    dbSim.leaderWorkerAttendance.saveBulk(records);
+    const supabase = getSupabaseClient();
+    if (!supabase) throw new Error("Supabase is not configured.");
+    const { error } = await supabase.from('leader_worker_attendance').upsert(records);
+    if (error) throw error;
   },
 
   deleteLeaderWorkerAttendance: async (id: string): Promise<void> => {
-    const supabase = !isNetworkSuspended ? getSupabaseClient() : null;
-    if (supabase) {
-      try {
-        const { error } = await supabase.from('leader_worker_attendance').delete().eq('id', id);
-        if (error) throw error;
-        dbSim.leaderWorkerAttendance.delete(id);
-        return;
-      } catch (err) {
-        console.warn('[SUPABASE FALLBACK] deleteLeaderWorkerAttendance failed. Deleting offline:', err);
-        isNetworkSuspended = true;
-      }
-    }
-    dbSim.leaderWorkerAttendance.delete(id);
+    const supabase = getSupabaseClient();
+    if (!supabase) throw new Error("Supabase is not configured.");
+    const { error } = await supabase.from('leader_worker_attendance').delete().eq('id', id);
+    if (error) throw error;
   },
 
   getDepartmentAttendance: async (activeProfile: Profile): Promise<DepartmentAttendance[]> => {
-    const supabase = !isNetworkSuspended ? getSupabaseClient() : null;
-    if (supabase) {
-      try {
-        let query = supabase.from('department_attendance').select('*');
-        if (activeProfile?.role === 'Department Head' && activeProfile?.department_id) {
-          query = query.eq('department_id', activeProfile.department_id);
-        }
-        return await executeRawQueryWithFallback<DepartmentAttendance>(query);
-      } catch (err) {
-        console.warn('[SUPABASE FALLBACK] getDepartmentAttendance failed. Downgrading offline:', err);
-        isNetworkSuspended = true;
-      }
-    }
-    let all = dbSim.departmentAttendance.getAll();
+    const supabase = getSupabaseClient();
+    if (!supabase) return [];
+    let query = supabase.from('department_attendance').select('*');
     if (activeProfile?.role === 'Department Head' && activeProfile?.department_id) {
-      all = all.filter(r => r.department_id === activeProfile.department_id);
+      query = query.eq('department_id', activeProfile.department_id);
     }
-    return all;
+    const { data, error } = await query;
+    if (error) throw error;
+    return data || [];
   },
 
   saveDepartmentAttendance: async (records: DepartmentAttendance[]): Promise<void> => {
-    const supabase = !isNetworkSuspended ? getSupabaseClient() : null;
-    if (supabase) {
-      try {
-        const { error } = await supabase.from('department_attendance').upsert(records);
-        if (error) throw error;
-        dbSim.departmentAttendance.saveBulk(records);
-        return;
-      } catch (err) {
-        console.warn('[SUPABASE FALLBACK] saveDepartmentAttendance failed. Saving offline:', err);
-        isNetworkSuspended = true;
-      }
-    }
-    dbSim.departmentAttendance.saveBulk(records);
+    const supabase = getSupabaseClient();
+    if (!supabase) throw new Error("Supabase is not configured.");
+    const { error } = await supabase.from('department_attendance').upsert(records);
+    if (error) throw error;
   },
 
   getCmdReports: async (activeProfile: Profile): Promise<CmdReport[]> => {
-    const supabase = !isNetworkSuspended ? getSupabaseClient() : null;
-    if (supabase) {
-      try {
-        let query = supabase.from('cmd_reports').select('*');
-        if (activeProfile?.role === 'Care Pastor' && activeProfile?.care_center_id) {
-          query = query.eq('care_center_id', activeProfile.care_center_id);
-        }
-        return await executeRawQueryWithFallback<CmdReport>(query);
-      } catch (err) {
-        console.warn('[SUPABASE FALLBACK] getCmdReports failed. Downgrading offline:', err);
-        isNetworkSuspended = true;
-      }
-    }
-    let all = dbSim.cmdReports.getAll();
+    const supabase = getSupabaseClient();
+    if (!supabase) return [];
+    let query = supabase.from('cmd_reports').select('*');
     if (activeProfile?.role === 'Care Pastor' && activeProfile?.care_center_id) {
-      all = all.filter(r => (r as any).care_center_id === activeProfile.care_center_id);
+      query = query.eq('care_center_id', activeProfile.care_center_id);
     }
-    return all;
+    const { data, error } = await query;
+    if (error) throw error;
+    return data || [];
   },
 
   saveCmdReport: async (report: CmdReport): Promise<void> => {
-    const supabase = !isNetworkSuspended ? getSupabaseClient() : null;
-    if (supabase) {
-      try {
-        const { error } = await supabase.from('cmd_reports').upsert(report);
-        if (error) throw error;
-        dbSim.cmdReports.save(report);
-        return;
-      } catch (err) {
-        console.warn('[SUPABASE FALLBACK] saveCmdReport failed. Saving offline:', err);
-        isNetworkSuspended = true;
-      }
-    }
-    dbSim.cmdReports.save(report);
+    const supabase = getSupabaseClient();
+    if (!supabase) throw new Error("Supabase is not configured.");
+    const { error } = await supabase.from('cmd_reports').upsert(report);
+    if (error) throw error;
   },
 
   deleteCmdReport: async (id: string): Promise<void> => {
-    const supabase = !isNetworkSuspended ? getSupabaseClient() : null;
-    if (supabase) {
-      try {
-        const { error } = await supabase.from('cmd_reports').delete().eq('id', id);
-        if (error) throw error;
-        dbSim.cmdReports.delete(id);
-        return;
-      } catch (err) {
-        console.warn('[SUPABASE FALLBACK] deleteCmdReport failed. Deleting offline:', err);
-        isNetworkSuspended = true;
-      }
-    }
-    dbSim.cmdReports.delete(id);
+    const supabase = getSupabaseClient();
+    if (!supabase) throw new Error("Supabase is not configured.");
+    const { error } = await supabase.from('cmd_reports').delete().eq('id', id);
+    if (error) throw error;
   },
 
   getSatelliteReports: async (activeProfile: Profile): Promise<SatelliteReport[]> => {
-    const supabase = !isNetworkSuspended ? getSupabaseClient() : null;
-    if (supabase) {
-      try {
-        let query = supabase.from('satellite_reports').select('*');
-        if (['Satellite Church Admin', 'satellite_admin', 'Satellite Admin'].includes(activeProfile?.role || '') && activeProfile?.satellite_church_id) {
-          query = query.eq('satellite_church_id', activeProfile.satellite_church_id);
-        }
-        return await executeRawQueryWithFallback<SatelliteReport>(query);
-      } catch (err) {
-        console.warn('[SUPABASE FALLBACK] getSatelliteReports failed. Downgrading offline:', err);
-        isNetworkSuspended = true;
-      }
-    }
-    let all = dbSim.satelliteReports.getAll();
+    const supabase = getSupabaseClient();
+    if (!supabase) return [];
+    let query = supabase.from('satellite_reports').select('*');
     if (['Satellite Church Admin', 'satellite_admin', 'Satellite Admin'].includes(activeProfile?.role || '') && activeProfile?.satellite_church_id) {
-      all = all.filter(r => r.satellite_church_id === activeProfile.satellite_church_id);
+      query = query.eq('satellite_church_id', activeProfile.satellite_church_id);
     }
-    return all;
+    const { data, error } = await query;
+    if (error) throw error;
+    return data || [];
   },
 
   saveSatelliteReport: async (report: SatelliteReport): Promise<void> => {
-    const supabase = !isNetworkSuspended ? getSupabaseClient() : null;
-    if (supabase) {
-      try {
-        const { error } = await supabase.from('satellite_reports').upsert(report);
-        if (error) throw error;
-        dbSim.satelliteReports.save(report);
-        return;
-      } catch (err) {
-        console.warn('[SUPABASE FALLBACK] saveSatelliteReport failed. Saving offline:', err);
-        isNetworkSuspended = true;
-      }
-    }
-    dbSim.satelliteReports.save(report);
+    const supabase = getSupabaseClient();
+    if (!supabase) throw new Error("Supabase is not configured.");
+    const { error } = await supabase.from('satellite_reports').upsert(report);
+    if (error) throw error;
   },
 
   deleteSatelliteReport: async (id: string): Promise<void> => {
-    const supabase = !isNetworkSuspended ? getSupabaseClient() : null;
-    if (supabase) {
-      try {
-        const { error } = await supabase.from('satellite_reports').delete().eq('id', id);
-        if (error) throw error;
-        dbSim.satelliteReports.delete(id);
-        return;
-      } catch (err) {
-        console.warn('[SUPABASE FALLBACK] deleteSatelliteReport failed. Deleting offline:', err);
-        isNetworkSuspended = true;
-      }
-    }
-    dbSim.satelliteReports.delete(id);
+    const supabase = getSupabaseClient();
+    if (!supabase) throw new Error("Supabase is not configured.");
+    const { error } = await supabase.from('satellite_reports').delete().eq('id', id);
+    if (error) throw error;
   },
 
   getCareCenterReports: async (activeProfile: Profile): Promise<CareCenterReport[]> => {
-    const supabase = !isNetworkSuspended ? getSupabaseClient() : null;
-    if (supabase) {
-      try {
-        let query = supabase.from('care_center_reports').select('*');
-        if (activeProfile?.role === 'Care Pastor' && activeProfile?.care_center_id) {
-          query = query.eq('care_center_id', activeProfile.care_center_id);
-        } else if (['CMD', 'Church Ministry Director'].includes(activeProfile?.role || '') && activeProfile?.assigned_cmd_name) {
-          query = query.ilike('care_center_name', `%${activeProfile.assigned_cmd_name}%`);
-        }
-        return await executeRawQueryWithFallback<CareCenterReport>(query);
-      } catch (err) {
-        console.warn('[SUPABASE FALLBACK] getCareCenterReports failed. Downgrading offline:', err);
-        isNetworkSuspended = true;
-      }
-    }
-    let all = dbSim.careCenterReports.getAll();
+    const supabase = getSupabaseClient();
+    if (!supabase) return [];
+    let query = supabase.from('care_center_reports').select('*');
     if (activeProfile?.role === 'Care Pastor' && activeProfile?.care_center_id) {
-      all = all.filter(r => r.care_center_id === activeProfile.care_center_id);
+      query = query.eq('care_center_id', activeProfile.care_center_id);
     } else if (['CMD', 'Church Ministry Director'].includes(activeProfile?.role || '') && activeProfile?.assigned_cmd_name) {
-      all = all.filter(r => r.care_center_name && r.care_center_name.toLowerCase().includes(activeProfile.assigned_cmd_name!.toLowerCase()));
+      query = query.ilike('care_center_name', `%${activeProfile.assigned_cmd_name}%`);
     }
-    return all;
+    const { data, error } = await query;
+    if (error) throw error;
+    return data || [];
   },
 
   saveCareCenterReport: async (report: CareCenterReport): Promise<void> => {
-    const supabase = !isNetworkSuspended ? getSupabaseClient() : null;
-    if (supabase) {
-      try {
-        const { error } = await supabase.from('care_center_reports').upsert(report);
-        if (error) throw error;
-        dbSim.careCenterReports.save(report);
-        return;
-      } catch (err) {
-        console.warn('[SUPABASE FALLBACK] saveCareCenterReport failed. Saving offline:', err);
-        isNetworkSuspended = true;
-      }
-    }
-    dbSim.careCenterReports.save(report);
+    const supabase = getSupabaseClient();
+    if (!supabase) throw new Error("Supabase is not configured.");
+    const { error } = await supabase.from('care_center_reports').upsert(report);
+    if (error) throw error;
   },
 
   deleteCareCenterReport: async (id: string): Promise<void> => {
-    const supabase = !isNetworkSuspended ? getSupabaseClient() : null;
-    if (supabase) {
-      try {
-        const { error } = await supabase.from('care_center_reports').delete().eq('id', id);
-        if (error) throw error;
-        dbSim.careCenterReports.delete(id);
-        return;
-      } catch (err) {
-        console.warn('[SUPABASE FALLBACK] deleteCareCenterReport failed. Deleting offline:', err);
-        isNetworkSuspended = true;
-      }
-    }
-    dbSim.careCenterReports.delete(id);
+    const supabase = getSupabaseClient();
+    if (!supabase) throw new Error("Supabase is not configured.");
+    const { error } = await supabase.from('care_center_reports').delete().eq('id', id);
+    if (error) throw error;
   },
 
   getFinances: async (activeProfile: Profile): Promise<Finance[]> => {
-    const supabase = !isNetworkSuspended ? getSupabaseClient() : null;
-    if (supabase) {
-      try {
-        let query = supabase.from('finances').select('*');
-        const role = activeProfile?.role;
-        if (['Satellite Church Admin', 'satellite_admin', 'Satellite Admin'].includes(role || '') && activeProfile?.satellite_church_id) {
-          query = query.eq('satellite_church_id', activeProfile.satellite_church_id);
-        } else if (['CMD', 'Church Ministry Director'].includes(role || '') && activeProfile?.assigned_cmd_name) {
-          // Fetch assigned care center ids
-          const { data: cData } = await supabase.from('care_centers').select('id').ilike('cmd_name', `%${activeProfile.assigned_cmd_name}%`);
-          if (cData && cData.length > 0) {
-            const ids = cData.map(c => c.id);
-            query = query.in('care_center_id', ids);
-          } else {
-            query = query.eq('care_center_id', 'none-matching-id');
-          }
-        }
-        return await executeRawQueryWithFallback<Finance>(query);
-      } catch (err) {
-        console.warn('[SUPABASE FALLBACK] getFinances failed. Downgrading offline:', err);
-        isNetworkSuspended = true;
-      }
-    }
-    let all = dbSim.finances.getAll();
+    const supabase = getSupabaseClient();
+    if (!supabase) return [];
+    let query = supabase.from('finances').select('*');
     const role = activeProfile?.role;
     if (['Satellite Church Admin', 'satellite_admin', 'Satellite Admin'].includes(role || '') && activeProfile?.satellite_church_id) {
-      all = all.filter(r => r.satellite_church_id === activeProfile.satellite_church_id);
+      query = query.eq('satellite_church_id', activeProfile.satellite_church_id);
     } else if (['CMD', 'Church Ministry Director'].includes(role || '') && activeProfile?.assigned_cmd_name) {
-      const assignedCenters = dbSim.careCenters.getAll().filter(c => c.cmd_name && c.cmd_name.toLowerCase().includes(activeProfile.assigned_cmd_name!.toLowerCase()));
-      const assignedIds = assignedCenters.map(c => c.id);
-      all = all.filter(r => r.care_center_id && assignedIds.includes(r.care_center_id));
+      const { data: cData } = await supabase.from('care_centers').select('id').ilike('cmd_name', `%${activeProfile.assigned_cmd_name}%`);
+      if (cData && cData.length > 0) {
+        const ids = cData.map(c => c.id);
+        query = query.in('care_center_id', ids);
+      } else {
+        query = query.eq('care_center_id', 'none-matching-id');
+      }
     }
-    return all;
+    const { data, error } = await query;
+    if (error) throw error;
+    return data || [];
   },
 
   saveFinance: async (record: Finance): Promise<void> => {
-    const supabase = !isNetworkSuspended ? getSupabaseClient() : null;
-    if (supabase) {
-      try {
-        const { error } = await supabase.from('finances').upsert(record);
-        if (error) throw error;
-        dbSim.finances.save(record);
-        return;
-      } catch (err) {
-        console.warn('[SUPABASE FALLBACK] saveFinance failed. Saving offline:', err);
-        isNetworkSuspended = true;
-      }
-    }
-    dbSim.finances.save(record);
+    const supabase = getSupabaseClient();
+    if (!supabase) throw new Error("Supabase is not configured.");
+    const { error } = await supabase.from('finances').upsert(record);
+    if (error) throw error;
   },
 
   deleteFinance: async (id: string): Promise<void> => {
-    const supabase = !isNetworkSuspended ? getSupabaseClient() : null;
-    if (supabase) {
-      try {
-        const { error } = await supabase.from('finances').delete().eq('id', id);
-        if (error) throw error;
-        dbSim.finances.delete(id);
-        return;
-      } catch (err) {
-        console.warn('[SUPABASE FALLBACK] deleteFinance failed. Deleting offline:', err);
-        isNetworkSuspended = true;
-      }
-    }
-    dbSim.finances.delete(id);
+    const supabase = getSupabaseClient();
+    if (!supabase) throw new Error("Supabase is not configured.");
+    const { error } = await supabase.from('finances').delete().eq('id', id);
+    if (error) throw error;
   },
 
   getFinanceCategories: async (): Promise<any[]> => {
-    const supabase = !isNetworkSuspended ? getSupabaseClient() : null;
-    if (supabase) {
-      try {
-        const { data, error } = await supabase.from('finance_categories').select('*');
-        if (error) throw error;
-        return data || [];
-      } catch (err) {
-        console.warn('[SUPABASE FALLBACK] getFinanceCategories failed. Downgrading offline:', err);
-        isNetworkSuspended = true;
-      }
-    }
-    return dbSim.financeCategories.getAll();
+    const supabase = getSupabaseClient();
+    if (!supabase) return [];
+    const { data, error } = await supabase.from('finance_categories').select('*');
+    if (error) throw error;
+    return data || [];
   },
 
   saveFinanceCategory: async (cat: any): Promise<void> => {
-    const supabase = !isNetworkSuspended ? getSupabaseClient() : null;
-    if (supabase) {
-      try {
-        const { error } = await supabase.from('finance_categories').upsert(cat);
-        if (error) throw error;
-        dbSim.financeCategories.save(cat);
-        return;
-      } catch (err) {
-        console.warn('[SUPABASE FALLBACK] saveFinanceCategory failed. Saving offline:', err);
-        isNetworkSuspended = true;
-      }
-    }
-    dbSim.financeCategories.save(cat);
+    const supabase = getSupabaseClient();
+    if (!supabase) throw new Error("Supabase is not configured.");
+    const { error } = await supabase.from('finance_categories').upsert(cat);
+    if (error) throw error;
   }
 };
 

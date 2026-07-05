@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { getSupabaseClient, getSupabaseConfig, dbSim, suspendNetworkAndUseOffline } from '../supabaseClient';
+import { getSupabaseClient, getSupabaseConfig } from '../supabaseClient';
 import { Profile } from '../types';
 import { Shield, Sparkles, Mail, Lock, Check, AlertCircle, ArrowRight, Database, User, Phone, MapPin } from 'lucide-react';
 
@@ -23,7 +23,6 @@ export default function LoginScreen({ onAuthSuccess, resolveProfile }: LoginScre
   const [selectedChurchId, setSelectedChurchId] = useState('');
   const [signUpAsSatelliteAdmin, setSignUpAsSatelliteAdmin] = useState(true);
   const [churches, setChurches] = useState<any[]>([]);
-  const [offlineRole, setOfflineRole] = useState('prof-admin');
 
   useEffect(() => {
     let active = true;
@@ -36,15 +35,11 @@ export default function LoginScreen({ onAuthSuccess, resolveProfile }: LoginScre
           if (!error && data) {
             list = data;
           } else {
-            console.warn('[AUTH] Error query satellite churches from Supabase. Falling back to simulation.', error);
-            list = dbSim.satelliteChurches.getAll();
+            console.warn('[AUTH] Error querying satellite churches from Supabase.', error);
           }
         } catch (err) {
-          console.error('[AUTH] Failed to fetch satellite churches from Supabase. Falling back to simulation.', err);
-          list = dbSim.satelliteChurches.getAll();
+          console.warn('[AUTH] Failed to fetch satellite churches from Supabase.', err);
         }
-      } else {
-        list = dbSim.satelliteChurches.getAll();
       }
       if (active) {
         setChurches(list);
@@ -72,33 +67,9 @@ export default function LoginScreen({ onAuthSuccess, resolveProfile }: LoginScre
 
     const supabase = getSupabaseClient();
     if (!supabase) {
-      console.log('[AUTH] No active Supabase client. Matching local simulated database for:', email);
-      const profile = dbSim.profiles.getByEmail(email.trim());
-      if (profile) {
-        suspendNetworkAndUseOffline();
-        if (typeof sessionStorage !== 'undefined') {
-          sessionStorage.setItem('dccms_offline_profile_id', profile.id);
-          sessionStorage.setItem('dccms_network_suspended', 'true');
-        }
-        const simulatedUser = {
-          id: profile.id,
-          email: profile.email,
-          isOffline: true,
-          user_metadata: {
-            full_name: profile.full_name,
-            role: profile.role
-          }
-        };
-        setSuccess(`Offline Bypass: Signed in as ${profile.full_name}`);
-        setTimeout(() => {
-          onAuthSuccess(simulatedUser, profile);
-        }, 800);
-        return;
-      } else {
-        setError('Database connection is unconfigured. To run in Offline Simulated Sandbox, please log in with a demo email (e.g., dcapapa.admdept@gmail.com).');
-        setLoading(false);
-        return;
-      }
+      setError('Database connection is unconfigured. Please configure your live Supabase credentials.');
+      setLoading(false);
+      return;
     }
 
     try {
@@ -215,45 +186,10 @@ export default function LoginScreen({ onAuthSuccess, resolveProfile }: LoginScre
         }
       }
     } catch (err: any) {
-      console.error('[AUTH ERROR] Exception caught on Supabase auth process:', err);
+      console.warn('[AUTH ERROR] Exception caught on Supabase auth process:', err);
       const rawMsg = err?.message || err?.details || String(err);
       
       let customError = rawMsg;
-      const isNetworkErr = rawMsg.toLowerCase().includes('failed to fetch') || 
-                           rawMsg.toLowerCase().includes('fetch') || 
-                           rawMsg.toLowerCase().includes('network') || 
-                           rawMsg.toLowerCase().includes('cors');
-
-      if (isNetworkErr) {
-        console.log('[AUTH] Network connection failed. Fallback to local simulated database for:', email);
-        const profile = dbSim.profiles.getByEmail(email.trim());
-        if (profile) {
-          suspendNetworkAndUseOffline();
-          if (typeof sessionStorage !== 'undefined') {
-            sessionStorage.setItem('dccms_offline_profile_id', profile.id);
-            sessionStorage.setItem('dccms_network_suspended', 'true');
-          }
-          const simulatedUser = {
-            id: profile.id,
-            email: profile.email,
-            isOffline: true,
-            user_metadata: {
-              full_name: profile.full_name,
-              role: profile.role
-            }
-          };
-          setSuccess(`Offline Fallback: Signed in offline as ${profile.full_name}`);
-          setTimeout(() => {
-            onAuthSuccess(simulatedUser, profile);
-          }, 800);
-          return;
-        }
-
-        customError = "Unable to connect to the church database. Try logging in with a demo email (e.g., dcapapa.admdept@gmail.com) to run offline.";
-        setError(customError);
-        return;
-      }
-
       if (rawMsg.toLowerCase().includes('email not confirmed') || 
           rawMsg.toLowerCase().includes('email_not_confirmed') ||
           rawMsg.toLowerCase().includes('email confirmation required') ||
@@ -267,36 +203,6 @@ export default function LoginScreen({ onAuthSuccess, resolveProfile }: LoginScre
       if (!success) {
         setLoading(false);
       }
-    }
-  };
-
-  const handleOfflineLogin = (profileId: string) => {
-    setLoading(true);
-    suspendNetworkAndUseOffline();
-    
-    const profile = dbSim.profiles.getById(profileId);
-    if (profile) {
-      if (typeof sessionStorage !== 'undefined') {
-        sessionStorage.setItem('dccms_offline_profile_id', profileId);
-        sessionStorage.setItem('dccms_network_suspended', 'true');
-      }
-      const simulatedUser = {
-        id: profile.id,
-        email: profile.email,
-        isOffline: true,
-        user_metadata: {
-          full_name: profile.full_name,
-          role: profile.role
-        }
-      };
-      
-      setSuccess(`Offline Bypass: Signed in as ${profile.full_name}`);
-      setTimeout(() => {
-        onAuthSuccess(simulatedUser, profile);
-      }, 800);
-    } else {
-      setError('Profile not found in simulation database.');
-      setLoading(false);
     }
   };
 
@@ -622,38 +528,7 @@ CREATE POLICY "Allow internal read for authenticated workers"
             </button>
           </div>
 
-          <div className="mt-6 pt-6 border-t border-slate-700/50 flex flex-col items-center gap-3">
-            <span className="text-[10px] font-bold font-mono text-slate-400 uppercase tracking-widest">
-              ⚡ Developer Offline Sandbox
-            </span>
-            <div className="w-full flex items-center gap-2">
-              <select
-                value={offlineRole}
-                onChange={(e) => setOfflineRole(e.target.value)}
-                className="flex-1 min-w-0 bg-slate-900 border border-slate-700 rounded-lg py-2 px-3 text-xs text-white focus:outline-none focus:ring-1 focus:ring-indigo-500 font-medium"
-              >
-                <option value="prof-admin">Super Admin (Pastor Peter)</option>
-                <option value="prof-pastor">Senior Pastor (Pastor David)</option>
-                <option value="prof-church-admin">Church Admin (Deaconess Sarah)</option>
-                <option value="prof-cmd">CMD (Pastor Kenneth Okafor)</option>
-                <option value="prof-care-pastor">Care Pastor (Pastor John)</option>
-                <option value="prof-sat-admin">Satellite Admin (Bro Daniel)</option>
-                <option value="prof-dept-head">Department Head (Bro David)</option>
-                <option value="prof-finance">Finance Officer (Deacon Thomas)</option>
-                <option value="prof-member">Member (Bro Isaac)</option>
-              </select>
-              <button
-                type="button"
-                onClick={() => handleOfflineLogin(offlineRole)}
-                className="shrink-0 bg-indigo-600/20 border border-indigo-500/40 hover:bg-indigo-600 hover:border-transparent text-indigo-300 hover:text-white font-bold uppercase text-[10px] tracking-wide px-3 py-2 rounded-lg transition-all cursor-pointer"
-              >
-                Launch
-              </button>
-            </div>
-            <p className="text-[9px] text-slate-500 text-center leading-relaxed max-w-xs font-mono">
-              Runs 100% locally with simulated database schemas & stats.
-            </p>
-          </div>
+
 
         </div>
       </div>

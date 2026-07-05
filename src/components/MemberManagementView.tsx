@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Member, Department, CareCenter, SatelliteChurch, Profile, MEMBER_SCHEMA, SchemaField } from '../types';
-import { api, getSupabaseConfig, getSupabaseClient, suspendNetworkAndUseOffline } from '../supabaseClient';
+import { api, getSupabaseConfig, getSupabaseClient } from '../supabaseClient';
 import DiagnosticsPanel from './DiagnosticsPanel';
 import {
   Search,
@@ -252,9 +252,6 @@ export default function MemberManagementView({
 
       if (error) {
         const errMsg = error.message || '';
-        if (errMsg.toLowerCase().includes('failed to fetch') || errMsg.toLowerCase().includes('fetch') || errMsg.toLowerCase().includes('network')) {
-          suspendNetworkAndUseOffline();
-        }
         setMembersQueryError(error.message);
         setMembers([]);
         setTotalMatchingRecords(0);
@@ -263,11 +260,8 @@ export default function MemberManagementView({
         setTotalMatchingRecords(count || 0);
       }
     } catch (err: any) {
-      console.error('[MEMBERS DIRECTORY DIRECT FETCH FAULT]', err);
+      console.warn('[MEMBERS DIRECTORY DIRECT FETCH FAULT]', err);
       const errMsg = err.message || JSON.stringify(err);
-      if (errMsg.toLowerCase().includes('failed to fetch') || errMsg.toLowerCase().includes('fetch') || errMsg.toLowerCase().includes('network')) {
-        suspendNetworkAndUseOffline();
-      }
       setMembersQueryError(errMsg);
       setMembers([]);
       setTotalMatchingRecords(0);
