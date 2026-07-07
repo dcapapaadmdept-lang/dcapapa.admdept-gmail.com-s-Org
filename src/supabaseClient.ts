@@ -219,6 +219,64 @@ export const setActiveProfileId = (id: string) => {
 // SIMULATED DATABASE REPOSITORIES
 export const dbSim: any = {};
 
+export function cleanPayloadAndLog<T extends object>(tableName: string, operation: 'INSERT' | 'UPDATE' | 'UPSERT', payload: T): any {
+  if (!payload || typeof payload !== 'object') {
+    return payload;
+  }
+
+  const generatedColumns = [
+    'total_attendance',
+    'total_offering',
+    'total_income',
+    'total_amount',
+    'grand_total'
+  ];
+
+  let cleaned: any;
+  if (Array.isArray(payload)) {
+    cleaned = payload.map(item => {
+      const copy = { ...item };
+      generatedColumns.forEach(col => {
+        delete copy[col];
+      });
+      return copy;
+    });
+  } else {
+    cleaned = { ...payload };
+    generatedColumns.forEach(col => {
+      delete cleaned[col];
+    });
+  }
+
+  console.log(`[DATABASE OP] Attempting ${operation} on "${tableName}"`, {
+    operation,
+    tableName,
+    payload: cleaned
+  });
+
+  return cleaned;
+}
+
+export async function executeUpsertAndLog(tableName: string, payload: any): Promise<void> {
+  const supabase = getSupabaseClient();
+  if (!supabase) {
+    throw new Error("Supabase is not configured.");
+  }
+  
+  const cleanedPayload = cleanPayloadAndLog(tableName, 'UPSERT', payload);
+  const { error } = await supabase.from(tableName).upsert(cleanedPayload);
+  
+  if (error) {
+    console.error(`[DATABASE FAULT] Failed to UPSERT into "${tableName}"`, {
+      tableName,
+      operation: 'UPSERT',
+      payload: cleanedPayload,
+      error
+    });
+    throw error;
+  }
+}
+
 // UNIFIED API BRIDGE: Swaps between Live Supabase and Simulated Engine with integrated RLS logic
 // RLS simulation applies logic transparently so that the front-end code remains clean and uniform.
 export const api = {
@@ -456,10 +514,7 @@ export const api = {
   },
 
   saveMemberAttendance: async (record: MemberAttendance): Promise<void> => {
-    const supabase = getSupabaseClient();
-    if (!supabase) throw new Error("Supabase is not configured.");
-    const { error } = await supabase.from('member_attendance').upsert(record);
-    if (error) throw error;
+    await executeUpsertAndLog('member_attendance', record);
   },
 
   deleteMemberAttendance: async (id: string): Promise<void> => {
@@ -483,17 +538,11 @@ export const api = {
   },
 
   saveLeaderWorkerAttendance: async (record: LeaderWorkerAttendance): Promise<void> => {
-    const supabase = getSupabaseClient();
-    if (!supabase) throw new Error("Supabase is not configured.");
-    const { error } = await supabase.from('leader_worker_attendance').upsert(record);
-    if (error) throw error;
+    await executeUpsertAndLog('leader_worker_attendance', record);
   },
 
   saveLeaderWorkerAttendanceBulk: async (records: LeaderWorkerAttendance[]): Promise<void> => {
-    const supabase = getSupabaseClient();
-    if (!supabase) throw new Error("Supabase is not configured.");
-    const { error } = await supabase.from('leader_worker_attendance').upsert(records);
-    if (error) throw error;
+    await executeUpsertAndLog('leader_worker_attendance', records);
   },
 
   deleteLeaderWorkerAttendance: async (id: string): Promise<void> => {
@@ -516,10 +565,7 @@ export const api = {
   },
 
   saveDepartmentAttendance: async (records: DepartmentAttendance[]): Promise<void> => {
-    const supabase = getSupabaseClient();
-    if (!supabase) throw new Error("Supabase is not configured.");
-    const { error } = await supabase.from('department_attendance').upsert(records);
-    if (error) throw error;
+    await executeUpsertAndLog('department_attendance', records);
   },
 
   getCmdReports: async (activeProfile: Profile): Promise<CmdReport[]> => {
@@ -535,10 +581,7 @@ export const api = {
   },
 
   saveCmdReport: async (report: CmdReport): Promise<void> => {
-    const supabase = getSupabaseClient();
-    if (!supabase) throw new Error("Supabase is not configured.");
-    const { error } = await supabase.from('cmd_reports').upsert(report);
-    if (error) throw error;
+    await executeUpsertAndLog('cmd_reports', report);
   },
 
   deleteCmdReport: async (id: string): Promise<void> => {
@@ -561,10 +604,7 @@ export const api = {
   },
 
   saveSatelliteReport: async (report: SatelliteReport): Promise<void> => {
-    const supabase = getSupabaseClient();
-    if (!supabase) throw new Error("Supabase is not configured.");
-    const { error } = await supabase.from('satellite_reports').upsert(report);
-    if (error) throw error;
+    await executeUpsertAndLog('satellite_reports', report);
   },
 
   deleteSatelliteReport: async (id: string): Promise<void> => {
@@ -589,10 +629,7 @@ export const api = {
   },
 
   saveCareCenterReport: async (report: CareCenterReport): Promise<void> => {
-    const supabase = getSupabaseClient();
-    if (!supabase) throw new Error("Supabase is not configured.");
-    const { error } = await supabase.from('care_center_reports').upsert(report);
-    if (error) throw error;
+    await executeUpsertAndLog('care_center_reports', report);
   },
 
   deleteCareCenterReport: async (id: string): Promise<void> => {
@@ -624,10 +661,7 @@ export const api = {
   },
 
   saveFinance: async (record: Finance): Promise<void> => {
-    const supabase = getSupabaseClient();
-    if (!supabase) throw new Error("Supabase is not configured.");
-    const { error } = await supabase.from('finances').upsert(record);
-    if (error) throw error;
+    await executeUpsertAndLog('finances', record);
   },
 
   deleteFinance: async (id: string): Promise<void> => {
@@ -1185,6 +1219,20 @@ drop trigger if exists trigger_calc_satellite_totals on public.satellite_reports
 create trigger trigger_calc_satellite_totals
   before insert or update on public.satellite_reports
   for each row execute function public.calc_satellite_report_totals();
+
+create or replace function public.calc_care_center_report_totals()
+returns trigger as $$
+begin
+  new.total_attendance := new.male + new.female + new.children;
+  new.total_offering := new.offering_cash + new.offering_transfer;
+  return new;
+end;
+$$ language plpgsql;
+
+drop trigger if exists trigger_calc_care_center_totals on public.care_center_reports;
+create trigger trigger_calc_care_center_totals
+  before insert or update on public.care_center_reports
+  for each row execute function public.calc_care_center_report_totals();
 
 -- Automatic profile insertion function on Auth Sign up
 create or replace function public.handle_new_user()
