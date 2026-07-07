@@ -15,7 +15,10 @@ export default function ProfileView({ activeProfile, onRefresh }: ProfileViewPro
   const [success, setSuccess] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const { isConfigured } = getSupabaseConfig();
+  let isConfigured = false;
+  try {
+    isConfigured = getSupabaseConfig().isConfigured;
+  } catch (err) {}
 
   const handleUpdate = async (e: React.FormEvent) => {
     e.preventDefault();

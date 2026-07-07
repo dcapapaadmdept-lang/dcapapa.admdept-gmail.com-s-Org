@@ -48,7 +48,20 @@ export default function SupabaseHealthCheckView({ activeProfile, onRefreshAll, s
     return null;
   }
 
-  const [dbConfig, setDbConfig] = useState(getSupabaseConfig());
+  const [dbConfig, setDbConfig] = useState(() => {
+    try {
+      return getSupabaseConfig();
+    } catch (e: any) {
+      return {
+        url: '',
+        key: '',
+        isConfigured: false,
+        rawUrl: '',
+        rawKey: '',
+        error: e?.message || String(e)
+      };
+    }
+  });
   const [membersCount, setMembersCount] = useState<number | null>(null);
   const [membersTestError, setMembersTestError] = useState<string | null>(null);
   const [testSuccess, setTestSuccess] = useState<boolean | null>(null);

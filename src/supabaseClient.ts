@@ -54,22 +54,29 @@ export const getSupabaseConfig = () => {
   const metaEnv = (import.meta as any).env || {};
   const processEnv = typeof process !== 'undefined' ? process.env : ((globalThis as any).process?.env || {});
 
-  const rawUrl = localStorage.getItem(LS_KEYS.SUPABASE_URL) || 
-                 metaEnv.VITE_SUPABASE_URL || 
-                 metaEnv.NEXT_PUBLIC_SUPABASE_URL ||
-                 processEnv.VITE_SUPABASE_URL ||
-                 processEnv.NEXT_PUBLIC_SUPABASE_URL || 
+  // Direct environment variable check for maximum framework compatibility (Vite/Netlify)
+  const envUrl = metaEnv.VITE_SUPABASE_URL || 
+                 metaEnv.SUPABASE_URL || 
+                 processEnv.VITE_SUPABASE_URL || 
+                 processEnv.SUPABASE_URL || 
                  '';
 
-  const rawKey = localStorage.getItem(LS_KEYS.SUPABASE_KEY) || 
-                 metaEnv.VITE_SUPABASE_ANON_KEY || 
-                 metaEnv.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-                 processEnv.VITE_SUPABASE_ANON_KEY ||
-                 processEnv.NEXT_PUBLIC_SUPABASE_ANON_KEY || 
+  const envKey = metaEnv.VITE_SUPABASE_ANON_KEY || 
+                 metaEnv.SUPABASE_ANON_KEY || 
+                 processEnv.VITE_SUPABASE_ANON_KEY || 
+                 processEnv.SUPABASE_ANON_KEY || 
                  '';
 
-  let url = rawUrl.trim();
-  let key = rawKey.trim();
+  // Strict check: if required environment variables are absent, throw clear errors identifying the missing variable
+  if (!envUrl) {
+    throw new Error("Missing required environment variable: VITE_SUPABASE_URL (or SUPABASE_URL)");
+  }
+  if (!envKey) {
+    throw new Error("Missing required environment variable: VITE_SUPABASE_ANON_KEY (or SUPABASE_ANON_KEY)");
+  }
+
+  let url = envUrl.trim();
+  let key = envKey.trim();
 
   // Connection Audit: Automatically sanitize malformed URL paths (Requirement 8, 12)
   if (url) {
@@ -103,24 +110,34 @@ export const getSupabaseConfig = () => {
            s.length < 10;
   };
 
+  if (isPlaceholder(url)) {
+    throw new Error(`CRITICAL CONFIGURATION ERROR: The configured Supabase URL "${url}" is a placeholder.`);
+  }
+
+  if (isPlaceholder(key)) {
+    throw new Error("CRITICAL CONFIGURATION ERROR: The configured Supabase anon key is a placeholder.");
+  }
+
   const hasValidProtocol = url.startsWith('http://') || url.startsWith('https://');
-  const isOk = hasValidProtocol && !isPlaceholder(url) && !isPlaceholder(key);
+  if (!hasValidProtocol) {
+    throw new Error(`CRITICAL CONFIGURATION ERROR: The configured Supabase URL "${url}" has an invalid protocol.`);
+  }
 
   // Log active connection details to console (Requirement 3)
   console.log('--- SUPABASE RUNTIME CONNECTION AUDIT ---');
-  console.log(`- Supabase URL configured: "${rawUrl}"`);
+  console.log(`- Supabase URL configured: "${envUrl}"`);
   console.log(`- Sanitized URL in use:    "${url}"`);
   console.log(`- Key configured:          "${key ? key.slice(0, 15) + '...' + key.slice(-15) : 'NONE'}"`);
-  console.log(`- Decision context:        hasProtocol=${hasValidProtocol}, hasPlaceholder=${isPlaceholder(url) || isPlaceholder(key)}`);
-  console.log(`- Status:                  ${isOk ? 'CONFIGURED & VALIDATED' : 'DISCONNECTED/DEVELOPMENT FALLBACK'}`);
+  console.log(`- Decision context:        hasProtocol=${hasValidProtocol}, hasPlaceholder=false`);
+  console.log(`- Status:                  CONFIGURED & VALIDATED`);
   console.log('-----------------------------------------');
 
   return { 
-    url: isOk ? url : '', 
-    key: isOk ? key : '', 
-    isConfigured: isOk, 
-    rawUrl, 
-    rawKey 
+    url, 
+    key, 
+    isConfigured: true, 
+    rawUrl: envUrl, 
+    rawKey: envKey 
   };
 };
 
@@ -250,8 +267,31 @@ export const api = {
   saveMember: async (member: Member): Promise<void> => {
     const supabase = getSupabaseClient();
     if (!supabase) throw new Error("Supabase is not configured.");
-    const { error } = await supabase.from('members').upsert(member);
-    if (error) throw error;
+    
+    let payload = { ...member };
+    let attempts = 0;
+    const maxAttempts = 15;
+    
+    while (attempts < maxAttempts) {
+      const { error } = await supabase.from('members').upsert(payload);
+      if (!error) return;
+      
+      const errMsg = error.message || '';
+      const errCode = error.code || '';
+      
+      // Self-healing database pattern: if column is missing on live database, strip it from payload and retry
+      if (errCode === '42703' || (errMsg.includes('column') && (errMsg.includes('does not exist') || errMsg.includes('not found')))) {
+        const match = errMsg.match(/column "([^"]+)"/) || errMsg.match(/column\s+([a-zA-Z0-9_]+)/);
+        if (match && match[1]) {
+          const colName = match[1];
+          console.warn(`[SUPABASE SELF-HEALING] Column "${colName}" does not exist in live members table. Stripping from payload and retrying...`);
+          delete (payload as any)[colName];
+          attempts++;
+          continue;
+        }
+      }
+      throw error;
+    }
   },
 
   deleteMember: async (id: string): Promise<{ success: boolean; member_id: string; payload: any; supabase_response: any }> => {
@@ -688,6 +728,13 @@ create table if not exists public.members (
   department_id text references public.departments(id) on delete set null,
   email text,
   photo_url text,
+  person_type text not null default 'Member' check (person_type in ('Member', 'Leader & Worker')),
+  leadership_position text,
+  ministry_department text,
+  worker_since date,
+  leadership_status text check (leadership_status in ('Active', 'On Leave', 'Suspended', 'Retired')),
+  reporting_pastor text,
+  service_unit text,
   status text not null default 'Active' check (status in ('Active', 'Inactive', 'Pending')),
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );

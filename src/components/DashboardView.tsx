@@ -8,7 +8,8 @@ import {
   DepartmentAttendance,
   CmdReport,
   SatelliteReport,
-  Profile
+  Profile,
+  CareCenterReport
 } from '../types';
 import DashboardCharts from './DashboardCharts';
 import {
@@ -75,6 +76,7 @@ interface DashboardViewProps {
   departmentAttendance: DepartmentAttendance[];
   cmdReports: CmdReport[];
   satelliteReports: SatelliteReport[];
+  careCenterReportsList: CareCenterReport[];
   membersQueryError?: string | null;
   totalSupabaseRecords?: number | null;
   onNavigate?: (tab: string) => void;
@@ -90,6 +92,7 @@ export default function DashboardView({
   departmentAttendance,
   cmdReports,
   satelliteReports,
+  careCenterReportsList = [],
   membersQueryError,
   totalSupabaseRecords,
   onNavigate
@@ -489,18 +492,22 @@ export default function DashboardView({
   }
 
   // ==========================================
-  // VIEW RENDERER 2: CARE PASTOR
+  // VIEW RENDERER 2: CARE PASTOR / CARE CENTER ADMIN
   // ==========================================
-  if (isCarePastor) {
+  const isCareCenterAdmin = ['Care Pastor', 'Care Center Admin', 'Care Center Administrator'].includes(activeProfile.role);
+  if (isCareCenterAdmin) {
     const myCenter = careCenters.find(c => c.id === activeProfile.care_center_id);
     const centerName = myCenter ? myCenter.cmd_name : 'Assigned Care Center';
 
     const cellMembers = members.length;
     const activeCellMembers = members.filter(m => m.status === 'Active').length;
     const cellAttendanceTimes = memberAttendance.length;
-    const reportsCount = cmdReports.length;
-    const soulsReaped = cmdReports.reduce((acc, cr) => acc + (cr.soul_won || 0), 0);
-    const cellOfferings = cmdReports.reduce((acc, cr) => acc + (cr.total_offering || 0), 0);
+    
+    // Filter live care center reports specifically for this admin's center
+    const myReports = careCenterReportsList.filter(r => r.care_center_id === activeProfile.care_center_id);
+    const reportsCount = myReports.length;
+    const soulsReaped = myReports.reduce((acc, cr) => acc + (cr.soul_won || 0), 0);
+    const cellOfferings = myReports.reduce((acc, cr) => acc + (cr.total_offering || 0), 0);
 
     return (
       <div className="space-y-6 animate-in fade-in duration-300">
@@ -590,7 +597,7 @@ export default function DashboardView({
             </div>
           </div>
 
-          {cmdReports.length === 0 ? (
+          {myReports.length === 0 ? (
             <div className="text-center py-6 text-slate-400 text-xs">
               No reports submitted for {centerName} yet. Visit the CMD Cell Reports tab to logs.
             </div>
@@ -607,13 +614,13 @@ export default function DashboardView({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {cmdReports.slice(0, 5).map((rep) => (
+                  {myReports.slice(0, 5).map((rep) => (
                     <tr key={rep.id} className="hover:bg-slate-50/50">
-                      <td className="p-3 font-semibold text-slate-900">{rep.date_of_meeting}</td>
+                      <td className="p-3 font-semibold text-slate-900">{rep.meeting_date}</td>
                       <td className="p-3 font-bold">{rep.total_attendance}</td>
                       <td className="p-3 font-bold text-emerald-600">+{rep.soul_won}</td>
                       <td className="p-3 font-semibold text-slate-900">{formatNaira(rep.total_offering)}</td>
-                      <td className="p-3 font-mono text-[11px]">{rep.care_pastor || rep.created_by || 'CM Leader'}</td>
+                      <td className="p-3 font-mono text-[11px]">{rep.care_pastor || rep.submitted_by || 'CM Leader'}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -628,7 +635,7 @@ export default function DashboardView({
           <div className="text-xs">
             <span className="font-bold text-amber-900 block">Row-Level Security (RLS) Filter Status: ACTIVE</span>
             <p className="text-amber-700 mt-1">
-              You are logged in as a <strong>Care Pastor</strong>. You can only view member rosters and submit weekly reports that are tied strictly to your assigned Care Center (<strong>{centerName}</strong>).
+              You are logged in as a <strong>Care Centre Admin</strong>. You can only view member rosters and submit weekly reports that are tied strictly to your assigned Care Center (<strong>{centerName}</strong>).
             </p>
           </div>
         </div>
@@ -922,21 +929,18 @@ export default function DashboardView({
   // ==========================================
   // VIEW RENDERER 5: SUPER ADMIN & CHURCH ADMINS
   // ==========================================
-  const totalMembers = totalSupabaseRecords !== null && totalSupabaseRecords > 0 ? totalSupabaseRecords : members.length;
-  const activeMembers = totalSupabaseRecords !== null && totalSupabaseRecords > 0 
-    ? Math.round(totalSupabaseRecords * 0.954)
-    : members.filter(m => m.status === 'Active').length;
-  const newMembers = totalSupabaseRecords !== null && totalSupabaseRecords > 0
-    ? Math.round(totalSupabaseRecords * 0.125)
-    : members.filter(m => {
-        const joinDate = new Date(m.join_date);
-        const limitDate = new Date('2025-01-01');
-        return joinDate >= limitDate;
-      }).length;
+  const totalMembers = members.length;
+  const activeMembers = members.filter(m => m.status === 'Active').length;
+  const newMembers = members.filter(m => {
+    if (!m.join_date) return false;
+    const joinDate = new Date(m.join_date);
+    const limitDate = new Date('2025-01-01');
+    return joinDate >= limitDate;
+  }).length;
 
-  const today = '2026-06-07';
-  const attendanceToday = memberAttendance.filter(a => a.attendance_date === today).length || 85;
-  const attendanceMonthly = memberAttendance.length + 12;
+  const todayStr = new Date().toISOString().split('T')[0];
+  const attendanceToday = memberAttendance.filter(a => a.attendance_date === todayStr).length;
+  const attendanceMonthly = memberAttendance.length;
 
   const totalCmds = careCenters.length;
   const totalCmdAttendance = cmdReports.reduce((acc, cr) => acc + cr.total_attendance, 0);
@@ -951,7 +955,7 @@ export default function DashboardView({
   const totalDepts = departments.length;
   const deptAttendancePresent = departmentAttendance.filter(da => da.attendance_status === 'Present').length;
   const totalDeptRecords = departmentAttendance.length;
-  const deptAttendanceRate = totalDeptRecords > 0 ? Math.round((deptAttendancePresent / totalDeptRecords) * 100) : 85;
+  const deptAttendanceRate = totalDeptRecords > 0 ? Math.round((deptAttendancePresent / totalDeptRecords) * 100) : 0;
 
   const totalOfferingsSum = totalCmdOfferings + totalSatIncome;
   const totalDonations = totalCmdOfferings * 0.4;

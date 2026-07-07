@@ -110,6 +110,7 @@ export interface CareCenter {
   created_at: string;
   care_center_name?: string;
   care_center_address?: string;
+  satellite_church_id?: string;
 }
 
 export interface SatelliteChurch {

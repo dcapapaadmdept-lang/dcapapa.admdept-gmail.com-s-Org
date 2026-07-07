@@ -25,7 +25,10 @@ export default function DiagnosticsPanel({
     return null;
   }
 
-  const { isConfigured } = getSupabaseConfig();
+  let isConfigured = false;
+  try {
+    isConfigured = getSupabaseConfig().isConfigured;
+  } catch (err) {}
 
   // Detect RLS blocked / Permission denied errors specifically
   const isRlsBlock = lastError?.toLowerCase().includes('permission denied') || 

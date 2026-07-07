@@ -3,6 +3,8 @@
 
 @theme {
   --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --color-brand-blue: #0038A8;
+  --color-brand-blue-hover: #002e8c;
 }
 
 body {

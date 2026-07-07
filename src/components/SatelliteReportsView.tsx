@@ -22,9 +22,11 @@ import {
   FileSpreadsheet,
   Trash2,
   X,
-  Info
+  Info,
+  CheckCircle
 } from 'lucide-react';
 import jsPDF from 'jspdf';
+import { drawPdfLogo } from './Logo';
 
 interface SatelliteReportsViewProps {
   activeProfile: Profile;
@@ -88,6 +90,9 @@ export default function SatelliteReportsView({
   const [importSummary, setImportSummary] = useState<any | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [submitSuccess, setSubmitSuccess] = useState<string | null>(null);
+
   // Requirement 9: Refresh automatically when new branches are added
   useEffect(() => {
     // Standard poll to guarantee up-to-date lists in all container environments
@@ -143,8 +148,11 @@ export default function SatelliteReportsView({
 
   const handleReportSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setSubmitError(null);
+    setSubmitSuccess(null);
     if (!targetSat) {
-      alert('Error: Please select a valid Satellite Church before submitting a report.');
+      const errMsg = 'Error: Please select a valid Satellite Church before submitting a report.';
+      setSubmitError(errMsg);
       return;
     }
 
@@ -177,15 +185,34 @@ export default function SatelliteReportsView({
       created_at: new Date().toISOString()
     };
 
-    await api.saveSatelliteReport(payload);
-    alert('Satellite Church report processed and saved!');
-    setActiveTab('reports');
-    onRefresh();
+    console.log('[DATABASE OP] Attempting INSERT on "satellite_reports"', {
+      operation: 'INSERT',
+      payload: payload
+    });
+
+    try {
+      await api.saveSatelliteReport(payload);
+      setSubmitSuccess('Satellite Church report processed and saved successfully!');
+      setActiveTab('reports');
+      onRefresh();
+    } catch (err: any) {
+      console.error('[DATABASE FAULT] Failed to insert into "satellite_reports"', {
+        operation: 'INSERT',
+        payload: payload,
+        error: err
+      });
+      setSubmitError(`Database Save Failed on 'satellite_reports': ${err.message || JSON.stringify(err)}`);
+    }
   };
 
   const handleRegisterBranch = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!regChurchName) return;
+    setSubmitError(null);
+    setSubmitSuccess(null);
+    if (!regChurchName) {
+      setSubmitError('Church Name is required.');
+      return;
+    }
 
     const payload: SatelliteChurch = {
       id: 'sat-' + Math.random().toString(36).substr(2, 9),
@@ -197,20 +224,50 @@ export default function SatelliteReportsView({
       created_at: new Date().toISOString()
     };
 
-    await api.saveSatelliteChurch(payload);
-    alert('Dominion City Satellite registered successfully!');
-    setRegChurchName('');
-    setRegChurchLoc('');
-    setRegPastor('');
-    setRegAdmin('');
-    setRegTreasurer('');
-    onRefresh();
+    console.log('[DATABASE OP] Attempting INSERT on "satellite_churches"', {
+      operation: 'INSERT',
+      payload: payload
+    });
+
+    try {
+      await api.saveSatelliteChurch(payload);
+      setSubmitSuccess('Dominion City Satellite registered successfully!');
+      setRegChurchName('');
+      setRegChurchLoc('');
+      setRegPastor('');
+      setRegAdmin('');
+      setRegTreasurer('');
+      onRefresh();
+    } catch (err: any) {
+      console.error('[DATABASE FAULT] Failed to insert into "satellite_churches"', {
+        operation: 'INSERT',
+        payload: payload,
+        error: err
+      });
+      setSubmitError(`Database Save Failed on 'satellite_churches': ${err.message || JSON.stringify(err)}`);
+    }
   };
 
   const handleDeleteBranch = async (id: string) => {
     if (confirm('Delete this satellite church? Doing so cascades and deauthorizes linked profiles.')) {
-      await api.deleteSatelliteChurch(id);
-      onRefresh();
+      setSubmitError(null);
+      setSubmitSuccess(null);
+      console.log('[DATABASE OP] Attempting DELETE on "satellite_churches"', {
+        operation: 'DELETE',
+        target_id: id
+      });
+      try {
+        await api.deleteSatelliteChurch(id);
+        setSubmitSuccess('Satellite church deleted successfully!');
+        onRefresh();
+      } catch (err: any) {
+        console.error('[DATABASE FAULT] Failed to delete from "satellite_churches"', {
+          operation: 'DELETE',
+          target_id: id,
+          error: err
+        });
+        setSubmitError(`Database Delete Failed on 'satellite_churches': ${err.message || JSON.stringify(err)}`);
+      }
     }
   };
 
@@ -308,12 +365,21 @@ Dominion City Lekki Satellite,10 Lekki Phase 1,Pastor Kola Olawale,Brother James
   // PDF Export for single satellite report card
   const exportSingleSatellitePDF = (rep: SatelliteReport) => {
     const doc = new jsPDF();
+    
+    // Draw brand-new vector heart skyline logo on top right
+    drawPdfLogo(doc, 185, 18);
+
     doc.setFont('Helvetica', 'bold');
-    doc.setFontSize(22);
+    doc.setFontSize(20);
     doc.text('DOMINION CITY APAPA', 14, 20);
-    doc.setFontSize(14);
-    doc.text(`SATELLITE SERVICE DATA SUMMARY - ${rep.service_type}`, 14, 28);
-    doc.line(14, 32, 196, 32);
+    doc.setFontSize(10);
+    doc.setFont('Helvetica', 'normal');
+    doc.text('Church Management System (DCCMS)', 14, 25);
+    
+    doc.setFont('Helvetica', 'bold');
+    doc.setFontSize(13);
+    doc.text(`SATELLITE SERVICE DATA SUMMARY - ${rep.service_type}`, 14, 32);
+    doc.line(14, 35, 196, 35);
 
     doc.setFontSize(11);
     doc.text('BRANCH IDENTITY PARAMETERS', 14, 40);
@@ -528,7 +594,19 @@ Dominion City Lekki Satellite,10 Lekki Phase 1,Pastor Kola Olawale,Brother James
 
       {/* TAB 2: SUBMIT REPORT CARD */}
       {activeTab === 'submit' && (
-        <div className="bg-white rounded-xl border border-slate-150 p-5 shadow-xs">
+        <div className="bg-white rounded-xl border border-slate-155 p-5 shadow-xs">
+          {submitSuccess && (
+            <div className="mb-4 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl p-4 text-xs flex items-center gap-2">
+              <CheckCircle className="w-5 h-5 text-emerald-600 shrink-0" />
+              <span>{submitSuccess}</span>
+            </div>
+          )}
+          {submitError && (
+            <div className="mb-4 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl p-4 text-xs flex items-center gap-2">
+              <AlertCircle className="w-5 h-5 text-rose-600 shrink-0" />
+              <span>{submitError}</span>
+            </div>
+          )}
           <form onSubmit={handleReportSubmit} className="space-y-6">
             
             <div className="bg-amber-50 border border-amber-100 p-4 rounded-xl flex items-start gap-3">
@@ -999,6 +1077,19 @@ CREATE POLICY "Admins can write satellite_churches"
             <div className="bg-white p-5 rounded-xl border border-slate-100 shadow-xs space-y-4 self-start">
               <span className="text-xs font-extrabold text-slate-900 block border-b border-slate-50 pb-2">Register Satellite Location</span>
               
+              {submitSuccess && (
+                <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-lg p-3 text-[11px] flex items-center gap-1.5">
+                  <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>{submitSuccess}</span>
+                </div>
+              )}
+              {submitError && (
+                <div className="bg-rose-50 border border-rose-200 text-rose-800 rounded-lg p-3 text-[11px] flex items-center gap-1.5">
+                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                  <span>{submitError}</span>
+                </div>
+              )}
+
               <form onSubmit={handleRegisterBranch} className="space-y-4">
                 <div>
                   <label className="text-[11px] font-bold text-slate-700 block mb-1">Church Name *</label>

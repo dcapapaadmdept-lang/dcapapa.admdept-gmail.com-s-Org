@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { getSupabaseClient, getSupabaseConfig } from '../supabaseClient';
 import { Profile } from '../types';
 import { Shield, Sparkles, Mail, Lock, Check, AlertCircle, ArrowRight, Database, User, Phone, MapPin } from 'lucide-react';
+import Logo from './Logo';
 
 interface LoginScreenProps {
   onAuthSuccess: (user: any, profile: Profile) => void;
@@ -52,7 +53,17 @@ export default function LoginScreen({ onAuthSuccess, resolveProfile }: LoginScre
     return () => { active = false; };
   }, []);
 
-  const { isConfigured, url } = getSupabaseConfig();
+  let isConfigured = false;
+  let url = '';
+  let configError: string | null = null;
+  try {
+    const config = getSupabaseConfig();
+    isConfigured = config.isConfigured;
+    url = config.url;
+  } catch (err: any) {
+    isConfigured = false;
+    configError = err?.message || String(err);
+  }
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -214,15 +225,13 @@ export default function LoginScreen({ onAuthSuccess, resolveProfile }: LoginScre
       <div className="sm:mx-auto sm:w-full sm:max-w-md z-10">
         {/* Logo/Branding */}
         <div className="flex justify-center">
-          <div className="w-14 h-14 rounded-2xl bg-indigo-600 shadow-lg flex items-center justify-center font-black text-2xl text-white">
-            ⭐
-          </div>
+          <Logo width={160} height={160} className="mx-auto" />
         </div>
-        <h2 className="mt-4 text-center text-2xl font-black text-white tracking-tight">
+        <h2 className="mt-4 text-center text-2xl font-black text-white tracking-tight uppercase">
           DOMINION CITY APAPA
         </h2>
         <p className="mt-1 text-center text-xs font-bold font-mono text-slate-400 uppercase tracking-widest">
-          Secure Registry Gate (DCCMS)
+          Church Management System (DCCMS)
         </p>
       </div>
 
@@ -245,11 +254,11 @@ export default function LoginScreen({ onAuthSuccess, resolveProfile }: LoginScre
           <form className="space-y-5" onSubmit={handleAuth}>
             
             {/* Error alerts */}
-            {error && (
+            {(configError || error) && (
               <div className="p-3 bg-rose-950/50 border border-rose-800/80 rounded-lg flex flex-col gap-2 text-rose-300 text-xs text-left" id="auth-error-banner">
                 <div className="flex items-start gap-2">
                   <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-                  <div className="font-semibold">{error}</div>
+                  <div className="font-semibold">{configError || error}</div>
                 </div>
 
                 {/* If it's a Profiles RLS error, offer immediate developer assistance & SQL fix */}

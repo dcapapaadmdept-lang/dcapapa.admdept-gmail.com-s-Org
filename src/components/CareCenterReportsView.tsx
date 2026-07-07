@@ -5,6 +5,7 @@ import {
   MapPin, UserCheck, RefreshCw, Search, Building2, CheckCircle, ChevronDown, Check, Columns
 } from 'lucide-react';
 import jsPDF from 'jspdf';
+import { drawPdfLogo } from './Logo';
 import { getSupabaseClient, api } from '../supabaseClient';
 import DiagnosticsPanel from './DiagnosticsPanel';
 import { CareCenter, CareCenterReport, Profile } from '../types';
@@ -443,24 +444,27 @@ export default function CareCenterReportsView({
 
       // Header Brand
       doc.setFont('Helvetica', 'bold');
-      doc.setFontSize(22);
+      doc.setFontSize(20);
       doc.setTextColor(15, 23, 42); // slate 900
-      doc.text('DOMINION CITY APAPA', 14, 25);
+      doc.text('DOMINION CITY APAPA', 14, 22);
       
       doc.setFont('Helvetica', 'normal');
       doc.setFontSize(10);
       doc.setTextColor(100, 116, 139); // slate 500
-      doc.text('SYSTEM IDENTIFIER: DCC-APAPA-CARE-HQ', 14, 30);
+      doc.text('Church Management System (DCCMS)', 14, 27);
+
+      // Draw brand-new vector heart skyline logo on top right
+      drawPdfLogo(doc, 185, 20);
 
       doc.setFont('Helvetica', 'bold');
       doc.setFontSize(13);
       doc.setTextColor(79, 70, 229); // Indigo 600 logo accent
-      doc.text('CARE CENTER WEEKLY REPORT', 14, 38);
+      doc.text('CARE CENTER WEEKLY REPORT', 14, 36);
 
       // Horizontal separator line
       doc.setDrawColor(79, 70, 229);
       doc.setLineWidth(1.5);
-      doc.line(14, 42, 196, 42);
+      doc.line(14, 40, 196, 40);
 
       // Block 1: Administrative Parameters
       doc.setFont('Helvetica', 'bold');
@@ -612,9 +616,38 @@ export default function CareCenterReportsView({
         </head>
         <body>
           <div class="header-container">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="80" height="80" style="margin: 0 auto 12px auto; display: block;">
+              <defs>
+                <linearGradient id="p-gold-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stop-color="#FBBF24" />
+                  <stop offset="50%" stop-color="#F59E0B" />
+                  <stop offset="100%" stop-color="#D97706" />
+                </linearGradient>
+                <linearGradient id="p-blue-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stop-color="#3B82F6" />
+                  <stop offset="100%" stop-color="#1D4ED8" />
+                </linearGradient>
+              </defs>
+              <path d="M 50,5 A 45,45 0 1,1 15,25" fill="none" stroke="url(#p-blue-grad)" stroke-width="4" stroke-linecap="round" opacity="0.85" />
+              <path d="M 50,95 A 45,45 0 0,1 10,65" fill="none" stroke="url(#p-blue-grad)" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="4,4" opacity="0.5" />
+              <circle cx="50" cy="50" r="32" fill="none" stroke="url(#p-blue-grad)" stroke-width="1.5" opacity="0.3" />
+              <path d="M 18,50 L 82,50" stroke="url(#p-blue-grad)" stroke-width="1.5" opacity="0.4" />
+              <path d="M 22,38 C 30,42 70,42 78,38" fill="none" stroke="url(#p-blue-grad)" stroke-width="1.2" opacity="0.4" />
+              <path d="M 22,62 C 30,58 70,58 78,62" fill="none" stroke="url(#p-blue-grad)" stroke-width="1.2" opacity="0.4" />
+              <path d="M 50,18 L 50,82" stroke="url(#p-blue-grad)" stroke-width="1.5" opacity="0.4" />
+              <path d="M 38,22 C 44,30 44,70 38,78" fill="none" stroke="url(#p-blue-grad)" stroke-width="1.2" opacity="0.4" />
+              <path d="M 62,22 C 56,30 56,70 62,78" fill="none" stroke="url(#p-blue-grad)" stroke-width="1.2" opacity="0.4" />
+              <path d="M 12,78 C 30,70 70,85 88,40" fill="none" stroke="url(#p-gold-grad)" stroke-width="5.5" stroke-linecap="round" />
+              <g transform="translate(50, 44)">
+                <path d="M 0,-18 L 0,14 M -10,-7 L 10,-7" stroke="url(#p-gold-grad)" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" />
+                <path d="M 0,-18 L 0,14 M -10,-7 L 10,-7" stroke="#FFFFFF" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.9" />
+                <path d="M 0,-24 L 0,-20 M -3,-22 L 3,-22" stroke="url(#p-gold-grad)" stroke-width="1.5" stroke-linecap="round" />
+              </g>
+              <path d="M 78,22 L 80,26 L 84,27 L 81,30 L 82,34 L 78,32 L 74,34 L 75,30 L 72,27 L 76,26 Z" fill="url(#p-gold-grad)" />
+            </svg>
             <div class="church-title">Dominion City Apapa</div>
             <div class="module-title">Care Center Weekly Report Card</div>
-            <p style="font-size: 12px; margin: 0 0 10px 0; color: #64748b;">Apapa Church Management System Database Archive (DCACMS)</p>
+            <p style="font-size: 12px; margin: 0 0 10px 0; color: #64748b;">Church Management System Database Archive (DCCMS)</p>
           </div>
 
           <div class="grid-container">
@@ -1531,6 +1564,15 @@ Dominion City Apapa`;
               <div className="bg-slate-50 border border-slate-150 p-3 rounded-lg">
                 <span className="text-[10px] text-slate-400 uppercase tracking-wider block">Active Care Pastor</span>
                 <p className="font-bold text-indigo-950 mt-0.5">{viewingReport.care_pastor}</p>
+              </div>
+
+              <div className="bg-slate-50 border border-slate-150 p-3 rounded-lg">
+                <span className="text-[10px] text-slate-400 uppercase tracking-wider block">Email Address</span>
+                <p className="font-bold text-slate-950 mt-0.5">{viewingReport.email_address || 'None specified'}</p>
+              </div>
+              <div className="bg-slate-50 border border-slate-150 p-3 rounded-lg">
+                <span className="text-[10px] text-slate-400 uppercase tracking-wider block">Goals Achieved</span>
+                <p className="font-bold text-slate-950 mt-0.5">{viewingReport.goals_met}</p>
               </div>
 
               <div className="col-span-2 bg-slate-50 border border-slate-150 p-3 rounded-lg">

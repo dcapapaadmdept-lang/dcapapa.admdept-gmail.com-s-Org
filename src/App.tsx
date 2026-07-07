@@ -33,6 +33,8 @@ import UserManagementView from './components/UserManagementView';
 import FinanceView from './components/FinanceView';
 import LoginScreen from './components/LoginScreen';
 import CmdDirectorPortal from './components/CmdDirectorPortal';
+import DepartmentsView from './components/DepartmentsView';
+import Logo from './components/Logo';
 import {
   LayoutDashboard,
   Users,
@@ -73,6 +75,7 @@ const getTabFromPathname = (pathname: string): any => {
   if (cleanPath.endsWith('/supabase-settings')) return 'supabase_settings';
   if (cleanPath.endsWith('/supabase-health-check')) return 'supabase_health_check';
   if (cleanPath.endsWith('/notifications')) return 'notifications';
+  if (cleanPath.endsWith('/departments')) return 'departments';
   return null;
 };
 
@@ -92,6 +95,7 @@ const getPathnameFromTab = (tab: string): string => {
     case 'supabase_settings': return '/supabase-settings';
     case 'supabase_health_check': return '/supabase-health-check';
     case 'notifications': return '/notifications';
+    case 'departments': return '/departments';
     default: return '/dashboard';
   }
 };
@@ -101,7 +105,7 @@ const isTabAuthorized = (tab: string, role: string): boolean => {
     return true;
   }
   if (role === 'Admin') {
-    return ['dashboard', 'members', 'leaders', 'attendance', 'sat_reports', 'cmd_reports', 'care_center_reports', 'finance', 'users', 'profile', 'my_church', 'notifications'].includes(tab);
+    return ['dashboard', 'members', 'leaders', 'attendance', 'sat_reports', 'cmd_reports', 'care_center_reports', 'finance', 'users', 'profile', 'my_church', 'notifications', 'departments'].includes(tab);
   }
   if (['CMD', 'Church Ministry Director'].includes(role)) {
     return ['dashboard', 'care_centers', 'care_center_reports', 'members', 'attendance', 'profile'].includes(tab);
@@ -116,7 +120,7 @@ const isTabAuthorized = (tab: string, role: string): boolean => {
   }
   const isDeptAdmin = ['Department Head', 'Department Admin', 'Department Administrator'].includes(role);
   if (isDeptAdmin) {
-    return ['dashboard', 'leaders', 'attendance', 'cmd_reports', 'profile'].includes(tab);
+    return ['dashboard', 'leaders', 'attendance', 'cmd_reports', 'profile', 'departments'].includes(tab);
   }
   const isMember = ['Member'].includes(role) || !role;
   if (isMember) {
@@ -127,14 +131,14 @@ const isTabAuthorized = (tab: string, role: string): boolean => {
 
 export default function App() {
   // 1. App Tab Navigation
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'members' | 'leaders' | 'attendance' | 'cmd_reports' | 'sat_reports' | 'supabase_settings' | 'supabase_health_check' | 'care_center_reports' | 'users' | 'finance' | 'my_church' | 'profile' | 'notifications'>(() => {
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'members' | 'leaders' | 'attendance' | 'cmd_reports' | 'sat_reports' | 'supabase_settings' | 'supabase_health_check' | 'care_center_reports' | 'users' | 'finance' | 'my_church' | 'profile' | 'notifications' | 'departments'>(() => {
     const path = window.location.pathname;
     const tabFromPath = getTabFromPathname(path);
     if (tabFromPath) return tabFromPath;
 
     const params = new URLSearchParams(window.location.search);
     const page = params.get('page');
-    const validPages = ['dashboard', 'members', 'leaders', 'attendance', 'cmd_reports', 'sat_reports', 'supabase_settings', 'supabase_health_check', 'care_center_reports', 'users', 'finance', 'my_church', 'profile', 'notifications'];
+    const validPages = ['dashboard', 'members', 'leaders', 'attendance', 'cmd_reports', 'sat_reports', 'supabase_settings', 'supabase_health_check', 'care_center_reports', 'users', 'finance', 'my_church', 'profile', 'notifications', 'departments'];
     if (page && validPages.includes(page)) {
       return page as any;
     }
@@ -624,8 +628,9 @@ export default function App() {
 
       } catch (err: any) {
         console.warn('[CRITICAL SCHEMATIC BOOT ALERT] Secure database initialization aborted:', err);
-        setStartupError("Unable to connect to the church database.");
-        setMembersQueryError("Unable to connect to the church database.");
+        const specificErrMsg = err?.message || "Unable to connect to the church database.";
+        setStartupError(specificErrMsg);
+        setMembersQueryError(specificErrMsg);
         setAuthenticatedUser(null);
         setShowAuthGate(true);
       } finally {
@@ -675,6 +680,7 @@ export default function App() {
       'department_attendance',
       'care_center_reports',
       'satellite_reports',
+      'cmd_reports',
       'finances',
       'finance_categories',
       'profiles',
@@ -729,9 +735,10 @@ export default function App() {
     return (
       <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4" id="loading-church-registries-shield">
         <div className="text-center space-y-4">
-          <div className="w-12 h-12 rounded-full border-4 border-indigo-600 border-t-transparent animate-spin mx-auto"></div>
+          <Logo width={120} height={120} className="mx-auto animate-pulse" />
+          <div className="w-8 h-8 rounded-full border-4 border-emerald-600 border-t-transparent animate-spin mx-auto"></div>
           <p className="text-xs font-bold text-slate-700 uppercase tracking-widest font-mono">Dominion City Apapa DCCMS</p>
-          <p className="text-[11px] text-slate-400">Loading secure church registries & setting RLS policies...</p>
+          <p className="text-[11px] text-slate-400 font-semibold">Loading secure church registries & setting RLS policies...</p>
         </div>
       </div>
     );
@@ -823,6 +830,7 @@ export default function App() {
           { id: 'leaders', label: 'Leaders & Workers Directory', icon: ShieldCheck, tab: 'leaders', badge: members.filter(m => m.person_type === 'Leader & Worker').length },
           { id: 'attendance', label: 'Attendance Register', icon: CalendarCheck, tab: 'attendance' },
           { id: 'cmd_reports', label: 'CMD Cell Reports', icon: FileSpreadsheet, tab: 'cmd_reports', badge: cmdReports.length },
+          { id: 'departments', label: 'Departments Registry', icon: Building, tab: 'departments', badge: departments.length },
           { id: 'sat_reports', label: 'Satellite Branches', icon: Radio, tab: 'sat_reports', badge: satelliteReports.length },
           { id: 'finance', label: 'Finance Ledger', icon: Coins, tab: 'finance' },
           { id: 'care_center_reports', label: 'Care Center Reports', icon: Heart, tab: 'care_center_reports', badge: careCenterReportsList.length },
@@ -842,7 +850,8 @@ export default function App() {
           { id: 'finance', label: 'Finance', icon: Coins, tab: 'finance' },
           { id: 'care_center_reports', label: 'Care Centers', icon: Heart, tab: 'care_center_reports' },
           { id: 'my_church', label: 'Satellite Churches', icon: Building, tab: 'my_church' },
-          { id: 'cmd_reports', label: 'Departments', icon: FileSpreadsheet, tab: 'cmd_reports' },
+          { id: 'cmd_reports', label: 'CMD Cell Reports', icon: FileSpreadsheet, tab: 'cmd_reports' },
+          { id: 'departments', label: 'Departments', icon: Building, tab: 'departments' },
           { id: 'profile', label: 'Profile', icon: User, tab: 'profile' }
         );
       } else if (isCMD) {
@@ -879,6 +888,7 @@ export default function App() {
           { id: 'leaders', label: 'Leaders & Workers', icon: ShieldCheck, tab: 'leaders' },
           { id: 'attendance', label: 'Department Attendance', icon: CalendarCheck, tab: 'attendance' },
           { id: 'cmd_reports', label: 'Reports', icon: FileSpreadsheet, tab: 'cmd_reports' },
+          { id: 'departments', label: 'Departments', icon: Building, tab: 'departments' },
           { id: 'profile', label: 'Profile', icon: User, tab: 'profile' }
         );
       } else {
@@ -899,6 +909,17 @@ export default function App() {
 
     return (
       <div className={outerContainerClass}>
+        {/* Sidebar Header Brand Logo */}
+        <div className="bg-[#1e293b]/40 p-4 rounded-xl border border-slate-800/60 text-center flex flex-col items-center">
+          <Logo width={80} height={80} className="mx-auto" />
+          <h2 className="mt-3 font-black text-white text-xs tracking-wider uppercase font-sans">
+            DOMINION CITY APAPA
+          </h2>
+          <p className="text-[9px] text-slate-400 font-bold font-mono uppercase tracking-widest mt-1">
+            Church Management System
+          </p>
+        </div>
+
         {/* Profile Summary Widget */}
         <div className="bg-[#1e293b] p-4 rounded-xl border border-slate-800 text-center relative overflow-hidden">
           <div className="w-14 h-14 rounded-full bg-emerald-600 border border-emerald-400 text-white flex items-center justify-center font-black text-sm mx-auto shadow-md uppercase">
@@ -992,11 +1013,9 @@ export default function App() {
             
             {/* Branding details */}
             <div className="flex items-center gap-2.5">
-              <div className="w-9 h-9 rounded-xl bg-slate-900 border border-slate-800 text-white flex items-center justify-center font-black shadow-md shrink-0">
-                ⭐
-              </div>
+              <Logo width={50} height={50} className="shrink-0" />
               <div>
-                <span className="font-black text-slate-900 text-sm sm:text-base tracking-tight block">DCCMS APAPA</span>
+                <span className="font-black text-slate-900 text-sm sm:text-base tracking-tight block uppercase">DOMINION CITY APAPA</span>
                 <span className="text-[10px] text-slate-400 font-bold block uppercase -mt-0.5 tracking-wider font-mono">Church Management System</span>
               </div>
             </div>
@@ -1046,11 +1065,12 @@ export default function App() {
             <div className="fixed inset-y-0 left-0 w-full max-w-xs bg-[#0f172a] shadow-2xl flex flex-col overflow-y-auto transition-transform duration-300 ease-in-out">
               {/* Header inside drawer */}
               <div className="p-4 border-b border-slate-800 flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="w-7 h-7 rounded-lg bg-slate-900 border border-slate-800 text-white flex items-center justify-center font-black text-xs">
-                    ⭐
+                <div className="flex items-center gap-2.5">
+                  <Logo width={60} height={60} className="shrink-0" />
+                  <div>
+                    <span className="font-black text-white text-xs tracking-tight block uppercase">DOMINION CITY APAPA</span>
+                    <span className="text-[9px] text-slate-500 font-bold block uppercase tracking-wider font-mono">DCCMS</span>
                   </div>
-                  <span className="font-bold text-white text-xs tracking-tight">DCCMS APAPA</span>
                 </div>
                 <button 
                   onClick={() => setMobileMenuOpen(false)}
@@ -1239,6 +1259,7 @@ export default function App() {
                   departmentAttendance={departmentAttendance}
                   cmdReports={cmdReports}
                   satelliteReports={satelliteReports}
+                  careCenterReportsList={careCenterReportsList}
                   membersQueryError={membersQueryError}
                   totalSupabaseRecords={totalSupabaseRecords}
                   onNavigate={setActiveTab}
@@ -1293,6 +1314,7 @@ export default function App() {
                   activeProfile={safeActiveProfile}
                   careCenters={careCenters}
                   cmdReports={cmdReports}
+                  careCenterReportsList={careCenterReportsList}
                   onRefresh={refreshDatabase}
                 />
               )}
@@ -1321,6 +1343,15 @@ export default function App() {
                   activeProfile={safeActiveProfile}
                   careCenters={careCenters}
                   careCenterReportsList={careCenterReportsList}
+                  onRefresh={refreshDatabase}
+                />
+              )}
+
+              {activeTab === 'departments' && (
+                <DepartmentsView
+                  activeProfile={safeActiveProfile}
+                  departments={departments}
+                  members={members}
                   onRefresh={refreshDatabase}
                 />
               )}

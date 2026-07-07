@@ -319,6 +319,9 @@ export default function MemberManagementView({
     photo_url: ''
   });
   const [isEditing, setIsEditing] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [formSuccess, setFormSuccess] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
 
   // CSV Import State
   const [isImportOpen, setIsImportOpen] = useState(false);
@@ -454,39 +457,108 @@ export default function MemberManagementView({
   // Handle Save (Create/Update)
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formMember.names) return;
+    setFormError(null);
+    setFormSuccess(null);
 
-    const id = formMember.id || 'mem-' + Math.random().toString(36).substr(2, 9);
-    const member_id = formMember.member_id || 'DCC-APA-' + Math.floor(1000 + Math.random() * 9000);
-    const dateStr = new Date().toISOString();
-
-    // Dynamically build payload targeting all active schema fields (Requirement 6 & 8)
-    const fullMemberPayload: any = {
-      id,
-      member_id,
-      created_at: formMember.created_at || dateStr
-    };
-
-    dynamicSchema.forEach(field => {
-      if (field.type === 'system') return; // Handled as core keys
-      const formVal = (formMember as any)[field.key];
-      if (formVal !== undefined) {
-        fullMemberPayload[field.key] = formVal === '' ? null : formVal;
-      } else {
-        fullMemberPayload[field.key] = field.nullable ? null : (field.options?.[0] || '');
-      }
-    });
-
-    if (isSatelliteAdmin && activeProfile.satellite_church_id) {
-      fullMemberPayload.satellite_church_id = activeProfile.satellite_church_id;
+    // 1. Validation
+    if (!formMember.names || formMember.names.trim().length < 2) {
+      setFormError("Full names are required and must be at least 2 characters.");
+      return;
     }
 
-    await api.saveMember(fullMemberPayload as Member);
-    setIsFormOpen(false);
-    onRefresh();
+    if (formMember.email && formMember.email.trim() !== '') {
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(formMember.email.trim())) {
+        setFormError("Please enter a valid email address.");
+        return;
+      }
+    }
+
+    if (formMember.phone_number && formMember.phone_number.trim() !== '') {
+      const phoneRegex = /^[+0-9\s\-()]{7,20}$/;
+      if (!phoneRegex.test(formMember.phone_number.trim())) {
+        setFormError("Please enter a valid mobile phone number.");
+        return;
+      }
+    }
+
+    if (!formMember.gender) {
+      setFormError("Gender is required.");
+      return;
+    }
+
+    if (!formMember.marital_status) {
+      setFormError("Marital status is required.");
+      return;
+    }
+
+    if (!formMember.status) {
+      setFormError("Roster status is required.");
+      return;
+    }
+
+    if (!formMember.person_type) {
+      setFormError("Person type is required.");
+      return;
+    }
+
+    setIsSaving(true);
+
+    try {
+      const id = formMember.id || 'mem-' + Math.random().toString(36).substr(2, 9);
+      const member_id = formMember.member_id || 'DCC-APA-' + Math.floor(1000 + Math.random() * 9000);
+      const dateStr = new Date().toISOString();
+
+      // Dynamically build payload targeting all active schema fields
+      const fullMemberPayload: any = {
+        id,
+        member_id,
+        created_at: formMember.created_at || dateStr
+      };
+
+      dynamicSchema.forEach(field => {
+        if (field.type === 'system') return; // Handled as core keys
+        const formVal = (formMember as any)[field.key];
+        if (formVal !== undefined) {
+          fullMemberPayload[field.key] = formVal === '' ? null : formVal;
+        } else {
+          fullMemberPayload[field.key] = field.nullable ? null : (field.options?.[0] || '');
+        }
+      });
+
+      if (isSatelliteAdmin && activeProfile.satellite_church_id) {
+        fullMemberPayload.satellite_church_id = activeProfile.satellite_church_id;
+      }
+
+      await api.saveMember(fullMemberPayload as Member);
+      
+      setFormSuccess(isEditing ? "Member details updated successfully!" : "New member registered successfully!");
+      
+      // Update the active detail/profile modal card immediately so it reflects changes without refresh!
+      if (selectedDetailsMember && selectedDetailsMember.id === id) {
+        setSelectedDetailsMember(fullMemberPayload as Member);
+      }
+
+      // Automatically refresh list records in App.tsx
+      onRefresh();
+
+      // Dismiss dialog automatically on successful save after a brief timeout
+      setTimeout(() => {
+        setIsFormOpen(false);
+      }, 1000);
+
+    } catch (err: any) {
+      console.error('[MEMBER MANAGEMENT] Save failed:', err);
+      const errMsg = err?.message || err?.details || JSON.stringify(err) || "Access policy block or database connection refused";
+      setFormError(`Database Save Failed: ${errMsg}`);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleEdit = (member: Member) => {
+    setFormError(null);
+    setFormSuccess(null);
     setFormMember(member);
     setIsEditing(true);
     setIsFormOpen(true);
@@ -820,6 +892,8 @@ David Alao,david.alao@gmail.com,+2348031122334,12 Marine Rd,Male,Married,1987-04
                   service_unit: ''
                 });
                 setIsEditing(false);
+                setFormError(null);
+                setFormSuccess(null);
                 setIsFormOpen(true);
               }}
               className="flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-bold text-white bg-slate-900 border border-slate-900 hover:bg-slate-800 transition rounded-lg cursor-pointer bg-clip-border"
@@ -1716,6 +1790,18 @@ CREATE POLICY "Authorize member record deletion"
             </div>
 
             <form onSubmit={handleSubmit} className="p-5 space-y-4 max-h-[80vh] overflow-y-auto">
+              {formError && (
+                <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg flex items-start gap-2 text-rose-800">
+                  <AlertOctagon className="w-4 h-4 shrink-0 mt-0.5 text-rose-600" />
+                  <span className="font-semibold text-xs text-rose-700">{formError}</span>
+                </div>
+              )}
+              {formSuccess && (
+                <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg flex items-start gap-2 text-emerald-800 animate-in fade-in">
+                  <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5 text-emerald-600" />
+                  <span className="font-semibold text-xs text-emerald-700">{formSuccess}</span>
+                </div>
+              )}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {dynamicSchema.map(field => {
                   const leadershipFieldKeys = [
