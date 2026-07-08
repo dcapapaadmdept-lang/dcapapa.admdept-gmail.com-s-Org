@@ -92,6 +92,7 @@ export default function SatelliteReportsView({
 
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitSuccess, setSubmitSuccess] = useState<string | null>(null);
+  const [editingReport, setEditingReport] = useState<SatelliteReport | null>(null);
 
   // Requirement 9: Refresh automatically when new branches are added
   useEffect(() => {
@@ -133,7 +134,7 @@ export default function SatelliteReportsView({
   const mySatelliteId = activeProfile.satellite_church_id;
   
   // Resolve active Satellite Church info
-  const targetSat = satelliteChurches.find(s => s.id === (isSatAdmin ? mySatelliteId : selectedSatId));
+  const targetSat = satelliteChurches.find(s => s.id === (isSatAdmin ? mySatelliteId : selectedSatId)) || (satelliteChurches.length > 0 ? satelliteChurches[0] : null);
 
   // Auto-calculated fields
   const totalAttendance = maleCount + femaleCount + childrenCount + onlineCount;
@@ -143,6 +144,42 @@ export default function SatelliteReportsView({
     if (targetSat) {
       setRegPastor(targetSat.pastor_nam);
       setTreasurerName(targetSat.treasurer_nam);
+    }
+  };
+
+  const handleEditReport = (rep: SatelliteReport) => {
+    setEditingReport(rep);
+    setSelectedSatId(rep.satellite_church_id);
+    setServiceDate(rep.service_date);
+    setServiceType(rep.service_type);
+    setSpecify(rep.specify || '');
+    setTimeStarted(rep.time_started);
+    setTimeEnded(rep.time_ended);
+    setMaleCount(rep.male || 0);
+    setFemaleCount(rep.female || 0);
+    setChildrenCount(rep.children || 0);
+    setOnlineCount(rep.online || 0);
+    setMvpCount(rep.mvp || 0);
+    setSoulsCount(rep.souls || 0);
+    setCashCollected(rep.cash || 0);
+    setTransferCollected(rep.transfer || 0);
+    setTreasurerName(rep.treasurer_nam);
+    setPeopleCalled(rep.people_called_for_service || 0);
+    setGoalNextMidweek(rep.goal_for_next_midweek_service || '');
+    
+    // Smooth scroll to top where the form resides
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleDeleteReport = async (id: string) => {
+    if (!window.confirm('Are you absolutely sure you want to delete this Satellite Report permanently?')) return;
+    try {
+      await api.deleteSatelliteReport(id);
+      setSubmitSuccess('Satellite Report deleted successfully!');
+      onRefresh();
+    } catch (err: any) {
+      console.error('[DATABASE FAULT] Failed to delete from "satellite_reports"', err);
+      setSubmitError(`Database Delete Failed on 'satellite_reports': ${err.message || JSON.stringify(err)}`);
     }
   };
 
@@ -157,7 +194,7 @@ export default function SatelliteReportsView({
     }
 
     const payload: SatelliteReport = {
-      id: 'rep-sat-' + Math.floor(100000 + Math.random() * 900000),
+      id: editingReport ? editingReport.id : 'rep-sat-' + Math.floor(100000 + Math.random() * 900000),
       satellite_church_id: targetSat.id,
       church_name: targetSat.church_name,
       church_loc: targetSat.church_loc,
@@ -181,26 +218,38 @@ export default function SatelliteReportsView({
       treasurer_nam: treasurerName || targetSat.treasurer_nam,
       people_called_for_service: peopleCalled,
       goal_for_next_midweek_service: goalNextMidweek,
-      created_by: activeProfile.full_name,
-      created_at: new Date().toISOString()
+      created_by: editingReport ? editingReport.created_by : activeProfile.full_name,
+      created_at: editingReport ? editingReport.created_at : new Date().toISOString()
     };
 
-    console.log('[DATABASE OP] Attempting INSERT on "satellite_reports"', {
-      operation: 'INSERT',
+    console.log(`[DATABASE OP] Attempting ${editingReport ? 'UPDATE' : 'INSERT'} on "satellite_reports"`, {
+      operation: editingReport ? 'UPDATE' : 'INSERT',
       payload: payload
     });
 
     try {
       await api.saveSatelliteReport(payload);
-      setSubmitSuccess('Satellite Church report processed and saved successfully!');
-      setActiveTab('reports');
+      setSubmitSuccess(editingReport ? 'Satellite Church report updated successfully!' : 'Satellite Church report processed and saved successfully!');
+      
+      // Reset form states
+      setEditingReport(null);
+      // Reset to defaults
+      setServiceDate(new Date().toISOString().split('T')[0]);
+      setSpecify('First Service Check');
+      setMaleCount(30);
+      setFemaleCount(45);
+      setChildrenCount(15);
+      setOnlineCount(10);
+      setMvpCount(4);
+      setSoulsCount(3);
+      setCashCollected(40000);
+      setTransferCollected(85000);
+      setPeopleCalled(12);
+      setGoalNextMidweek('Launch neighborhood study outlining to hit 130 attendees.');
+      
       onRefresh();
     } catch (err: any) {
-      console.error('[DATABASE FAULT] Failed to insert into "satellite_reports"', {
-        operation: 'INSERT',
-        payload: payload,
-        error: err
-      });
+      console.error('[DATABASE FAULT] Failed to save "satellite_reports"', err);
       setSubmitError(`Database Save Failed on 'satellite_reports': ${err.message || JSON.stringify(err)}`);
     }
   };
@@ -510,9 +559,23 @@ Dominion City Lekki Satellite,10 Lekki Phase 1,Pastor Kola Olawale,Brother James
         </div>
       </div>
 
-      {/* TAB 1: REPORTS ARCHIVE LIST */}
-      {activeTab === 'reports' && (
-        <div className="space-y-4">
+      {/* TAB 1 & 2: COMBINED REPORTS ARCHIVE LIST & SUBMISSION FORM */}
+      {(activeTab === 'reports' || activeTab === 'submit') && (
+        <div className="space-y-6">
+          
+          {submitSuccess && (
+            <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl p-4 text-xs flex items-center gap-2">
+              <CheckCircle className="w-5 h-5 text-emerald-600 shrink-0" />
+              <span>{submitSuccess}</span>
+            </div>
+          )}
+          {submitError && (
+            <div className="bg-rose-50 border border-rose-200 text-rose-800 rounded-xl p-4 text-xs flex items-center gap-2">
+              <AlertCircle className="w-5 h-5 text-rose-600 shrink-0" />
+              <span>{submitError}</span>
+            </div>
+          )}
+
           <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="text-xs">
               <span className="font-bold text-slate-800 block">Satellite Weekly Ledger Cards</span>
@@ -529,365 +592,410 @@ Dominion City Lekki Satellite,10 Lekki Phase 1,Pastor Kola Olawale,Brother James
             </button>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {satelliteReports.length === 0 ? (
-              <div className="col-span-1 md:col-span-2 text-center p-12 bg-white border border-slate-150 rounded-xl text-slate-400 text-xs">
-                No Satellite Reports found. Register reports today to launch aggregate graphs.
-              </div>
-            ) : (
-              satelliteReports.map((r) => (
-                <div key={r.id} className="bg-white rounded-xl border border-slate-200/60 p-5 shadow-xs space-y-4">
-                  <div className="flex items-start justify-between border-b border-slate-100 pb-2.5">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+            
+            {/* COLUMN 1: REPORT SUBMISSION / EDIT FORM */}
+            {['Super Admin', 'Admin', 'Church Administrator', 'Satellite Church Admin', 'satellite_admin', 'Satellite Admin'].includes(activeProfile.role) && (
+              <div className="lg:col-span-5 bg-white rounded-xl border border-slate-200 p-5 shadow-xs space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                  <h2 className="font-extrabold text-slate-900 text-sm flex items-center gap-2">
+                    <FileText className="w-4 h-4 text-indigo-600 animate-pulse" />
+                    {editingReport ? 'Edit Satellite Report Card' : 'Submit Weekly Report Card'}
+                  </h2>
+                  {editingReport && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingReport(null);
+                        setServiceDate(new Date().toISOString().split('T')[0]);
+                        setSpecify('First Service Check');
+                        setMaleCount(30);
+                        setFemaleCount(45);
+                        setChildrenCount(15);
+                        setOnlineCount(10);
+                        setMvpCount(4);
+                        setSoulsCount(3);
+                        setCashCollected(40000);
+                        setTransferCollected(85000);
+                        setPeopleCalled(12);
+                        setGoalNextMidweek('Launch neighborhood study outlining to hit 130 attendees.');
+                      }}
+                      className="text-[10px] bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-2 py-1 rounded"
+                    >
+                      Cancel Edit
+                    </button>
+                  )}
+                </div>
+
+                <div className="bg-amber-50 border border-amber-100 p-3 rounded-lg flex items-start gap-2.5">
+                  <Clock className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+                  <div className="text-[11px] text-amber-900">
+                    <span className="font-bold">Total Income Calculation Rule:</span>
+                    <p className="mt-0.5">Entering Cash and Transfer splits automatically computes the Total Income statement value.</p>
+                  </div>
+                </div>
+
+                <form onSubmit={handleReportSubmit} className="space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    
+                    {/* Select active satellite */}
                     <div>
-                      <span className="text-[10px] bg-slate-900 text-slate-100 font-mono font-bold px-2 py-0.5 rounded uppercase">
-                        {r.service_type || 'Sunday Service'}
-                      </span>
-                      <h3 className="font-extrabold text-slate-900 text-[13px] mt-1.5">{r.church_name}</h3>
-                      <p className="text-[10px] text-slate-400">{r.service_date} ({r.time_started} - {r.time_ended})</p>
+                      <label className="text-[11px] font-bold text-slate-700 block mb-1">Satellite Church *</label>
+                      <select
+                        disabled={isSatAdmin}
+                        value={isSatAdmin ? (mySatelliteId || '') : selectedSatId}
+                        onChange={(e) => setSelectedSatId(e.target.value)}
+                        className="w-full px-3 py-2 border border-slate-200 text-xs rounded-lg font-bold"
+                      >
+                        {isSatAdmin ? (
+                          <option value={mySatelliteId || ''}>{satelliteChurches.find(s=>s.id === mySatelliteId)?.church_name || 'My Satellite Church'}</option>
+                        ) : (
+                          satelliteChurches.map(sc => <option key={sc.id} value={sc.id}>{sc.church_name}</option>)
+                        )}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={handleAutofillMetadata}
+                        className="text-[9px] font-bold text-indigo-700 mt-1 block hover:underline"
+                      >
+                        [Autofill Branch metadata]
+                      </button>
                     </div>
 
+                    {/* Service Date */}
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-700 block mb-1">Service date *</label>
+                      <input
+                        type="date"
+                        required
+                        value={serviceDate}
+                        onChange={(e) => setServiceDate(e.target.value)}
+                        className="w-full px-3 py-2 border border-slate-200 text-xs rounded-lg font-semibold"
+                      />
+                    </div>
+
+                    {/* Service Type */}
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-700 block mb-1">Service category Type *</label>
+                      <select
+                        value={serviceType}
+                        onChange={(e) => setServiceType(e.target.value)}
+                        className="w-full px-3 py-2 border border-slate-250 text-xs rounded-lg bg-white"
+                      >
+                        <option value="Sunday Service">Sunday Service</option>
+                        <option value="Midweek Service">Midweek Service</option>
+                        <option value="Special Youth meeting">Special Youth meeting</option>
+                        <option value="DCLM vigilance program">DCLM vigilance program</option>
+                      </select>
+                    </div>
+
+                    {/* Specific Name */}
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-700 block mb-1">Service Specify</label>
+                      <input
+                        type="text"
+                        value={specify}
+                        onChange={(e) => setSpecify(e.target.value)}
+                        placeholder="e.g. Breakthrough Service 1"
+                        className="w-full px-3 py-2 border border-slate-200 text-xs rounded-lg"
+                      />
+                    </div>
+
+                    {/* Time Started */}
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-700 block mb-1">Time Started *</label>
+                      <input
+                        type="time"
+                        required
+                        value={timeStarted}
+                        onChange={(e) => setTimeStarted(e.target.value)}
+                        className="w-full px-3 py-2 border border-slate-200 text-xs rounded-lg font-mono font-bold"
+                      />
+                    </div>
+
+                    {/* Time Ended */}
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-700 block mb-1">Time Ended *</label>
+                      <input
+                        type="time"
+                        required
+                        value={timeEnded}
+                        onChange={(e) => setTimeEnded(e.target.value)}
+                        className="w-full px-3 py-2 border border-slate-200 text-xs rounded-lg font-mono font-bold"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Split inputs attendance */}
+                  <div className="border-t border-slate-100 pt-4 space-y-3">
+                    <span className="text-xs font-bold text-slate-800 block">Attendance Split Values</span>
+                    
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-400 block mb-1">Male *</label>
+                        <input
+                          type="number"
+                          required
+                          min={0}
+                          value={maleCount}
+                          onChange={(e) => setMaleCount(parseInt(e.target.value) || 0)}
+                          className="w-full px-3 py-2 border border-slate-200 text-xs rounded-lg font-bold"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-400 block mb-1">Female *</label>
+                        <input
+                          type="number"
+                          required
+                          min={0}
+                          value={femaleCount}
+                          onChange={(e) => setFemaleCount(parseInt(e.target.value) || 0)}
+                          className="w-full px-3 py-2 border border-slate-200 text-xs rounded-lg font-bold"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-400 block mb-1">Children *</label>
+                        <input
+                          type="number"
+                          required
+                          min={0}
+                          value={childrenCount}
+                          onChange={(e) => setChildrenCount(parseInt(e.target.value) || 0)}
+                          className="w-full px-3 py-2 border border-slate-200 text-xs rounded-lg font-bold"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-400 block mb-1">Online stream *</label>
+                        <input
+                          type="number"
+                          required
+                          min={0}
+                          value={onlineCount}
+                          onChange={(e) => setOnlineCount(parseInt(e.target.value) || 0)}
+                          className="w-full px-3 py-2 border border-slate-300 text-xs rounded-lg font-bold text-indigo-700 bg-indigo-50/50"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-400 block mb-1">MVP *</label>
+                        <input
+                          type="number"
+                          required
+                          min={0}
+                          value={mvpCount}
+                          onChange={(e) => setMvpCount(parseInt(e.target.value) || 0)}
+                          className="w-full px-3 py-2 border border-slate-200 text-xs rounded-lg font-bold"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-400 block mb-1">Souls Won *</label>
+                        <input
+                          type="number"
+                          required
+                          min={0}
+                          value={soulsCount}
+                          onChange={(e) => setSoulsCount(parseInt(e.target.value) || 0)}
+                          className="w-full px-3 py-2 border border-slate-200 text-xs rounded-lg font-bold"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="p-3 bg-slate-900 text-white rounded-lg flex justify-between items-center text-xs">
+                      <span>Total (M+F+C+Online):</span>
+                      <span className="font-extrabold text-blue-400 text-sm font-mono">{totalAttendance} Attendees</span>
+                    </div>
+                  </div>
+
+                  {/* Financial Statement splits */}
+                  <div className="border-t border-slate-100 pt-4 space-y-3">
+                    <span className="text-xs font-bold text-slate-800 block">Financial Statements & Cash splits (₦)</span>
+                    
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-400 block mb-1">Offering Cash *</label>
+                        <div className="relative">
+                          <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-400 font-bold text-xs font-sans">₦</span>
+                          <input
+                            type="number"
+                            required
+                            min={0}
+                            value={cashCollected}
+                            onChange={(e) => setCashCollected(parseFloat(e.target.value) || 0)}
+                            className="w-full pl-7 pr-3 py-2 border border-slate-200 text-xs rounded-lg font-bold"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="text-[10px] font-bold text-slate-400 block mb-1">Offering Transfer / POS *</label>
+                        <div className="relative">
+                          <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-400 font-bold text-xs font-sans">₦</span>
+                          <input
+                            type="number"
+                            required
+                            min={0}
+                            value={transferCollected}
+                            onChange={(e) => setTransferCollected(parseFloat(e.target.value) || 0)}
+                            className="w-full pl-7 pr-3 py-2 border border-slate-200 text-xs rounded-lg font-bold"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Display Statement Total Income */}
+                    <div className="p-3 bg-emerald-950 text-white rounded-lg flex items-center justify-between text-xs font-bold">
+                      <span className="text-emerald-400 font-bold font-sans">Total Income:</span>
+                      <span className="text-xs font-mono tracking-wide text-emerald-400 font-bold uppercase transition" id="total-income-statement">
+                        {formatNaira(totalIncome)}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Metadata details */}
+                  <div className="border-t border-slate-100 pt-4 space-y-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="text-[11px] font-bold text-slate-700 block mb-1">Treasurer Name *</label>
+                        <input
+                          type="text"
+                          required
+                          value={treasurerName}
+                          onChange={(e) => setTreasurerName(e.target.value)}
+                          placeholder="Sister Rachel Benson"
+                          className="w-full px-3 py-2 border border-slate-200 text-xs rounded-lg font-medium"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="text-[11px] font-bold text-slate-700 block mb-1">People Called *</label>
+                        <input
+                          type="number"
+                          required
+                          min={0}
+                          value={peopleCalled}
+                          onChange={(e) => setPeopleCalled(parseInt(e.target.value) || 0)}
+                          className="w-full px-3 py-2 border border-slate-200 text-xs rounded-lg font-medium"
+                        />
+                      </div>
+
+                      <div className="sm:col-span-2">
+                        <label className="text-[11px] font-bold text-slate-700 block mb-1">Goal for Next Midweek Service *</label>
+                        <textarea
+                          required
+                          rows={3}
+                          value={goalNextMidweek}
+                          onChange={(e) => setGoalNextMidweek(e.target.value)}
+                          placeholder="Describe target reach plans..."
+                          className="w-full px-3 py-2 border border-slate-200 text-xs rounded-lg font-medium"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="border-t border-slate-150 pt-4 flex items-center justify-end gap-2 text-xs font-semibold">
                     <button
-                      onClick={() => exportSingleSatellitePDF(r)}
-                      className="p-1 px-2.5 border border-indigo-150 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-[10px] font-bold flex items-center gap-1 transition rounded cursor-pointer"
+                      type="submit"
+                      className="w-full py-2.5 bg-slate-900 border border-slate-950 text-white rounded-xl hover:bg-slate-800 shadow-xs transition text-center cursor-pointer font-bold"
                     >
-                      <FileDown className="w-3 h-3" />
-                      PDF Card
+                      {editingReport ? 'Update Report Card' : 'File Satellite Report'}
                     </button>
                   </div>
-
-                  <div className="grid grid-cols-3 gap-2 text-center">
-                    <div className="bg-slate-50 p-2 rounded-lg border border-slate-100">
-                      <span className="text-[9px] text-slate-400 block font-bold uppercase">Roster Attendance</span>
-                      {/* Total Attendance is sum total showing Online check too! */}
-                      <span className="font-black text-slate-800 text-sm block mt-0.5">{r.total_attendance}</span>
-                      <span className="text-[8px] text-slate-400 block font-mono">M:{r.male} F:{r.female} C:{r.children} O:{r.online}</span>
-                    </div>
-
-                    <div className="bg-emerald-50/50 p-2 rounded-lg border border-emerald-100/30">
-                      <span className="text-[9px] text-slate-400 block font-bold uppercase">Total Income</span>
-                      <span className="font-black text-emerald-800 text-sm block mt-0.5">{formatNaira(r.total_income)}</span>
-                      <span className="text-[8px] text-slate-400 block font-mono">Transfer: ₦{r.transfer}</span>
-                    </div>
-
-                    <div className="bg-purple-50/50 p-2 rounded-lg border border-purple-100/30">
-                      <span className="text-[9px] text-slate-400 block font-bold uppercase">Growth Index</span>
-                      <span className="font-black text-purple-800 text-sm block mt-0.5">+{r.souls} Souls / {r.mvp} MVP</span>
-                      <span className="text-[8px] text-slate-400 block font-bold">Calls made: {r.people_called_for_service}</span>
-                    </div>
-                  </div>
-
-                  <div className="text-[11px] bg-slate-50 p-3 rounded-lg border border-slate-100 space-y-1">
-                    <span className="font-bold text-slate-700 block">Stated Midweek Goal Focus:</span>
-                    <p className="text-slate-600 italic">"{r.goal_for_next_midweek_service || 'N/A'}"</p>
-                  </div>
-
-                  <div className="flex justify-between items-center text-[10px] text-slate-400 border-t border-slate-100 pt-2.5 font-mono">
-                    <span>Admin: {r.admin_nam}</span>
-                    <span>Filed: {r.created_by}</span>
-                  </div>
-                </div>
-              ))
+                </form>
+              </div>
             )}
+
+            {/* COLUMN 2: HISTORICAL LIST */}
+            <div className={['Super Admin', 'Admin', 'Church Administrator', 'Satellite Church Admin', 'satellite_admin', 'Satellite Admin'].includes(activeProfile.role) ? 'lg:col-span-7 space-y-4' : 'lg:col-span-12 space-y-4'}>
+              <h2 className="text-sm font-extrabold text-slate-900 flex items-center gap-2">
+                <Clock className="w-4 h-4 text-indigo-600" />
+                Submitted Satellite Reports ({satelliteReports.length})
+              </h2>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2 gap-4">
+                {satelliteReports.length === 0 ? (
+                  <div className="col-span-full text-center p-12 bg-white border border-slate-150 rounded-xl text-slate-400 text-xs">
+                    No Satellite Reports found. Submit a report on the form to launch aggregate graphs.
+                  </div>
+                ) : (
+                  satelliteReports.map((r) => (
+                    <div key={r.id} className="bg-white rounded-xl border border-slate-200/60 p-4 shadow-xs space-y-3">
+                      <div className="flex items-start justify-between border-b border-slate-100 pb-2 flex-wrap gap-2">
+                        <div>
+                          <span className="text-[9px] bg-slate-900 text-slate-100 font-mono font-bold px-2 py-0.5 rounded uppercase">
+                            {r.service_type || 'Sunday Service'}
+                          </span>
+                          <h3 className="font-extrabold text-slate-900 text-[12px] mt-1">{r.church_name}</h3>
+                          <p className="text-[9px] text-slate-400">{r.service_date} ({r.time_started} - {r.time_ended})</p>
+                        </div>
+
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <button
+                            onClick={() => exportSingleSatellitePDF(r)}
+                            className="p-1 px-2 border border-indigo-150 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-[9px] font-bold flex items-center gap-1 transition rounded cursor-pointer"
+                            title="Export single PDF Card"
+                          >
+                            <FileDown className="w-3 h-3" />
+                            PDF
+                          </button>
+
+                          {['Super Admin', 'Admin', 'Church Administrator', 'Satellite Church Admin', 'satellite_admin', 'Satellite Admin'].includes(activeProfile.role) && (
+                            <>
+                              <button
+                                onClick={() => handleEditReport(r)}
+                                className="p-1 px-2 border border-amber-150 bg-amber-50 hover:bg-amber-100 text-amber-700 text-[9px] font-bold flex items-center gap-1 transition rounded cursor-pointer"
+                                title="Edit this report card"
+                              >
+                                Edit
+                              </button>
+                              
+                              <button
+                                onClick={() => handleDeleteReport(r.id)}
+                                className="p-1 px-2 border border-rose-150 bg-rose-50 hover:bg-rose-100 text-rose-700 text-[9px] font-bold flex items-center gap-1 transition rounded cursor-pointer"
+                                title="Delete this report permanently"
+                              >
+                                <Trash2 className="w-3 h-3 text-rose-600" />
+                                Delete
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-1.5 text-center">
+                        <div className="bg-slate-50 p-1.5 rounded-lg border border-slate-100">
+                          <span className="text-[8px] text-slate-400 block font-bold uppercase">Roster</span>
+                          <span className="font-black text-slate-800 text-xs block mt-0.5">{r.total_attendance}</span>
+                          <span className="text-[7px] text-slate-400 block font-mono">M:{r.male} F:{r.female} C:{r.children} O:{r.online}</span>
+                        </div>
+
+                        <div className="bg-emerald-50/50 p-1.5 rounded-lg border border-emerald-100/30">
+                          <span className="text-[8px] text-slate-400 block font-bold uppercase">Total Income</span>
+                          <span className="font-black text-emerald-800 text-xs block mt-0.5">{formatNaira(r.total_income)}</span>
+                          <span className="text-[7px] text-slate-400 block font-mono">Trsf: ₦{r.transfer}</span>
+                        </div>
+
+                        <div className="bg-purple-50/50 p-1.5 rounded-lg border border-purple-100/30">
+                          <span className="text-[8px] text-slate-400 block font-bold uppercase">Growth Index</span>
+                          <span className="font-black text-purple-800 text-xs block mt-0.5">+{r.souls} Souls / {r.mvp} MVP</span>
+                          <span className="text-[7px] text-slate-400 block font-bold">Calls: {r.people_called_for_service}</span>
+                        </div>
+                      </div>
+
+                      <div className="text-[10px] bg-slate-50 p-2 rounded-lg border border-slate-100 space-y-0.5">
+                        <span className="font-bold text-slate-700 block">Stated Midweek Goal Focus:</span>
+                        <p className="text-slate-600 italic">"{r.goal_for_next_midweek_service || 'N/A'}"</p>
+                      </div>
+
+                      <div className="flex justify-between items-center text-[9px] text-slate-400 border-t border-slate-100 pt-1.5 font-mono">
+                        <span>Admin: {r.admin_nam}</span>
+                        <span>Filed: {r.created_by}</span>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
           </div>
-        </div>
-      )}
-
-      {/* TAB 2: SUBMIT REPORT CARD */}
-      {activeTab === 'submit' && (
-        <div className="bg-white rounded-xl border border-slate-155 p-5 shadow-xs">
-          {submitSuccess && (
-            <div className="mb-4 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl p-4 text-xs flex items-center gap-2">
-              <CheckCircle className="w-5 h-5 text-emerald-600 shrink-0" />
-              <span>{submitSuccess}</span>
-            </div>
-          )}
-          {submitError && (
-            <div className="mb-4 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl p-4 text-xs flex items-center gap-2">
-              <AlertCircle className="w-5 h-5 text-rose-600 shrink-0" />
-              <span>{submitError}</span>
-            </div>
-          )}
-          <form onSubmit={handleReportSubmit} className="space-y-6">
-            
-            <div className="bg-amber-50 border border-amber-100 p-4 rounded-xl flex items-start gap-3">
-              <Clock className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
-              <div className="text-xs text-amber-900">
-                <span className="font-bold">Total Income Calculation Rule:</span>
-                <p className="mt-0.5">Entering the Cash and Bank Transfer splits automatically updates the Total Income statement value on compilation, formatted with standard church symbols: <strong>Total Income: ₦XXXXXX</strong></p>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-              
-              {/* Select active satellite */}
-              <div>
-                <label className="text-[11px] font-bold text-slate-700 block mb-1">Satellite Church *</label>
-                <select
-                  disabled={isSatAdmin}
-                  value={isSatAdmin ? (mySatelliteId || '') : selectedSatId}
-                  onChange={(e) => setSelectedSatId(e.target.value)}
-                  className="w-full px-3 py-2 border border-slate-200 text-xs rounded-lg font-bold"
-                >
-                  {isSatAdmin ? (
-                    <option value={mySatelliteId || ''}>{satelliteChurches.find(s=>s.id === mySatelliteId)?.church_name || 'My Satellite Church'}</option>
-                  ) : (
-                    satelliteChurches.map(sc => <option key={sc.id} value={sc.id}>{sc.church_name}</option>)
-                  )}
-                </select>
-                <button
-                  type="button"
-                  onClick={handleAutofillMetadata}
-                  className="text-[9px] font-bold text-indigo-700 mt-1 block hover:underline"
-                >
-                  [Autofill Branch metadata]
-                </button>
-              </div>
-
-              {/* Service Date */}
-              <div>
-                <label className="text-[11px] font-bold text-slate-700 block mb-1">Service date *</label>
-                <input
-                  type="date"
-                  required
-                  value={serviceDate}
-                  onChange={(e) => setServiceDate(e.target.value)}
-                  className="w-full px-3 py-2 border border-slate-200 text-xs rounded-lg"
-                />
-              </div>
-
-              {/* Service Type */}
-              <div>
-                <label className="text-[11px] font-bold text-slate-700 block mb-1">Service category Type *</label>
-                <select
-                  value={serviceType}
-                  onChange={(e) => setServiceType(e.target.value)}
-                  className="w-full px-3 py-2 border border-slate-250 text-xs rounded-lg bg-white"
-                >
-                  <option value="Sunday Service">Sunday Service</option>
-                  <option value="Midweek Service">Midweek Service</option>
-                  <option value="Special Youth meeting">Special Youth meeting</option>
-                  <option value="DCLM vigilance program">DCLM vigilance program</option>
-                </select>
-              </div>
-
-              {/* Specific Name */}
-              <div>
-                <label className="text-[11px] font-bold text-slate-700 block mb-1">Service Specify</label>
-                <input
-                  type="text"
-                  value={specify}
-                  onChange={(e) => setSpecify(e.target.value)}
-                  placeholder="e.g. Breakthrough Service 1"
-                  className="w-full px-3 py-2 border border-slate-200 text-xs rounded-lg"
-                />
-              </div>
-
-              {/* Time Started */}
-              <div>
-                <label className="text-[11px] font-bold text-slate-700 block mb-1">Time Started *</label>
-                <input
-                  type="time"
-                  required
-                  value={timeStarted}
-                  onChange={(e) => setTimeStarted(e.target.value)}
-                  className="w-full px-3 py-2 border border-slate-200 text-xs rounded-lg font-mono font-bold"
-                />
-              </div>
-
-              {/* Time Ended */}
-              <div>
-                <label className="text-[11px] font-bold text-slate-700 block mb-1">Time Ended *</label>
-                <input
-                  type="time"
-                  required
-                  value={timeEnded}
-                  onChange={(e) => setTimeEnded(e.target.value)}
-                  className="w-full px-3 py-2 border border-slate-200 text-xs rounded-lg font-mono font-bold"
-                />
-              </div>
-
-              {/* Split inputs attendance */}
-              <div className="col-span-1 sm:col-span-2 lg:col-span-3 border-t border-slate-100 pt-4 space-y-3">
-                <span className="text-xs font-bold text-slate-800 block">Attendance Split Values (including Live streams)</span>
-                
-                <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
-                  <div>
-                    <label className="text-[10px] font-bold text-slate-400 block mb-1">Male *</label>
-                    <input
-                      type="number"
-                      required
-                      min={0}
-                      value={maleCount}
-                      onChange={(e) => setMaleCount(parseInt(e.target.value) || 0)}
-                      className="w-full px-3 py-2 border border-slate-200 text-xs rounded-lg font-bold"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-bold text-slate-400 block mb-1">Female *</label>
-                    <input
-                      type="number"
-                      required
-                      min={0}
-                      value={femaleCount}
-                      onChange={(e) => setFemaleCount(parseInt(e.target.value) || 0)}
-                      className="w-full px-3 py-2 border border-slate-200 text-xs rounded-lg font-bold"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-bold text-slate-400 block mb-1">Children *</label>
-                    <input
-                      type="number"
-                      required
-                      min={0}
-                      value={childrenCount}
-                      onChange={(e) => setChildrenCount(parseInt(e.target.value) || 0)}
-                      className="w-full px-3 py-2 border border-slate-200 text-xs rounded-lg font-bold"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-bold text-slate-400 block mb-1">Online stream *</label>
-                    <input
-                      type="number"
-                      required
-                      min={0}
-                      value={onlineCount}
-                      onChange={(e) => setOnlineCount(parseInt(e.target.value) || 0)}
-                      className="w-full px-3 py-2 border border-slate-300 text-xs rounded-lg font-bold text-indigo-700 bg-indigo-50/50"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-bold text-slate-400 block mb-1">MVP *</label>
-                    <input
-                      type="number"
-                      required
-                      min={0}
-                      value={mvpCount}
-                      onChange={(e) => setMvpCount(parseInt(e.target.value) || 0)}
-                      className="w-full px-3 py-2 border border-slate-200 text-xs rounded-lg font-bold"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-bold text-slate-400 block mb-1">Souls Won *</label>
-                    <input
-                      type="number"
-                      required
-                      min={0}
-                      value={soulsCount}
-                      onChange={(e) => setSoulsCount(parseInt(e.target.value) || 0)}
-                      className="w-full px-3 py-2 border border-slate-200 text-xs rounded-lg font-bold"
-                    />
-                  </div>
-                </div>
-
-                <div className="p-3 bg-slate-900 text-white rounded-lg flex justify-between items-center text-xs">
-                  <span>Aggregate Attendance (M+F+C+Online):</span>
-                  <span className="font-extrabold text-blue-400 text-sm font-mono">{totalAttendance} Attendees</span>
-                </div>
-              </div>
-
-              {/* Financial Statement splits */}
-              <div className="col-span-1 sm:col-span-2 lg:col-span-3 border-t border-slate-100 pt-4 space-y-3">
-                <span className="text-xs font-bold text-slate-800 block">Financial Statements & Cash splits (₦)</span>
-                
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-[10px] font-bold text-slate-400 block mb-1">Offering Cash *</label>
-                    <div className="relative">
-                      <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-400 font-bold text-xs font-sans">₦</span>
-                      <input
-                        type="number"
-                        required
-                        min={0}
-                        value={cashCollected}
-                        onChange={(e) => setCashCollected(parseFloat(e.target.value) || 0)}
-                        className="w-full pl-7 pr-3 py-2 border border-slate-200 text-xs rounded-lg font-bold"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="text-[10px] font-bold text-slate-400 block mb-1">Offering Transfer / POS *</label>
-                    <div className="relative">
-                      <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-400 font-bold text-xs font-sans">₦</span>
-                      <input
-                        type="number"
-                        required
-                        min={0}
-                        value={transferCollected}
-                        onChange={(e) => setTransferCollected(parseFloat(e.target.value) || 0)}
-                        className="w-full pl-7 pr-3 py-2 border border-slate-200 text-xs rounded-lg font-bold"
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                {/* Display Statement Total Income */}
-                <div className="p-3.5 bg-emerald-950 text-white rounded-lg flex items-center justify-between text-xs font-bold">
-                  <span className="text-emerald-400 font-bold font-sans">Total Income Statement:</span>
-                  <span className="text-sm font-mono tracking-wide text-emerald-400 font-bold uppercase transition" id="total-income-statement">
-                    Total Income: {formatNaira(totalIncome)}
-                  </span>
-                </div>
-              </div>
-
-              {/* Metadata details */}
-              <div className="col-span-1 sm:col-span-2 lg:col-span-3 border-t border-slate-100 pt-4 space-y-4">
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                  <div>
-                    <label className="text-[11px] font-bold text-slate-700 block mb-1">Treasurer Name *</label>
-                    <input
-                      type="text"
-                      required
-                      value={treasurerName}
-                      onChange={(e) => setTreasurerName(e.target.value)}
-                      placeholder="Sister Rachel Benson"
-                      className="w-full px-3 py-2 border border-slate-200 text-xs rounded-lg"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-[11px] font-bold text-slate-700 block mb-1">People Called for Service Mobilization *</label>
-                    <input
-                      type="number"
-                      required
-                      min={0}
-                      value={peopleCalled}
-                      onChange={(e) => setPeopleCalled(parseInt(e.target.value) || 0)}
-                      className="w-full px-3 py-2 border border-slate-200 text-xs rounded-lg"
-                    />
-                  </div>
-
-                  <div className="sm:col-span-3">
-                    <label className="text-[11px] font-bold text-slate-700 block mb-1">Goal for Next Midweek Service *</label>
-                    <textarea
-                      required
-                      rows={3}
-                      value={goalNextMidweek}
-                      onChange={(e) => setGoalNextMidweek(e.target.value)}
-                      placeholder="Describe target reach plans..."
-                      className="w-full px-3 py-2 border border-slate-200 text-xs rounded-lg"
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="border-t border-slate-150 pt-5 flex items-center justify-end gap-2 text-xs font-semibold">
-              <button
-                type="button"
-                onClick={() => setActiveTab('reports')}
-                className="px-5 py-2.5 border border-slate-250 hover:bg-slate-50 rounded-xl"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                className="px-5 py-2.5 bg-slate-900 border border-slate-950 text-white rounded-xl hover:bg-slate-800 shadow-xs transition"
-              >
-                File Satellite Report
-              </button>
-            </div>
-          </form>
         </div>
       )}
 

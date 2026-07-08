@@ -1313,7 +1313,7 @@ create policy "Workers can select members based on role filters"
   using (
     (select role from public.profiles where id = auth.uid()) in ('Super Admin', 'Senior Pastor', 'Church Administrator', 'Finance Officer') or
     ((select role from public.profiles where id = auth.uid()) = 'Care Pastor' and care_center_id = (select care_center_id from public.profiles where id = auth.uid())) or
-    ((select role from public.profiles where id = auth.uid()) = 'Satellite Church Admin' and satellite_church_id = (select satellite_church_id from public.profiles where id = auth.uid())) or
+    ((select role from public.profiles where id = auth.uid()) in ('Satellite Church Admin', 'satellite_admin', 'Satellite Admin') and satellite_church_id = (select satellite_church_id from public.profiles where id = auth.uid())) or
     ((select role from public.profiles where id = auth.uid()) = 'Department Head' and department_id = (select department_id from public.profiles where id = auth.uid())) or
     (email = (select email from public.profiles where id = auth.uid()))
   );
@@ -1324,7 +1324,7 @@ create policy "Admins and authorized personnel can insert/update members"
   using (
     (select role from public.profiles where id = auth.uid()) in ('Super Admin', 'Church Administrator') or
     ((select role from public.profiles where id = auth.uid()) = 'Care Pastor' and care_center_id = (select care_center_id from public.profiles where id = auth.uid())) or
-    ((select role from public.profiles where id = auth.uid()) = 'Satellite Church Admin' and satellite_church_id = (select satellite_church_id from public.profiles where id = auth.uid())) or
+    ((select role from public.profiles where id = auth.uid()) in ('Satellite Church Admin', 'satellite_admin', 'Satellite Admin') and satellite_church_id = (select satellite_church_id from public.profiles where id = auth.uid())) or
     ((select role from public.profiles where id = auth.uid()) = 'Department Head' and department_id = (select department_id from public.profiles where id = auth.uid()))
   );
 
@@ -1368,7 +1368,7 @@ create policy "Satellite read access"
   on public.satellite_reports for select
   using (
     (select role from public.profiles where id = auth.uid()) in ('Super Admin', 'Senior Pastor', 'Church Administrator', 'Finance Officer') or
-    ((select role from public.profiles where id = auth.uid()) = 'Satellite Church Admin' and satellite_church_id = (select satellite_church_id from public.profiles where id = auth.uid()))
+    ((select role from public.profiles where id = auth.uid()) in ('Satellite Church Admin', 'satellite_admin', 'Satellite Admin') and satellite_church_id = (select satellite_church_id from public.profiles where id = auth.uid()))
   );
 
 drop policy if exists "Satellite write access" on public.satellite_reports;
@@ -1376,7 +1376,7 @@ create policy "Satellite write access"
   on public.satellite_reports for all
   using (
     (select role from public.profiles where id = auth.uid()) in ('Super Admin', 'Church Administrator') or
-    ((select role from public.profiles where id = auth.uid()) = 'Satellite Church Admin' and satellite_church_id = (select satellite_church_id from public.profiles where id = auth.uid()))
+    ((select role from public.profiles where id = auth.uid()) in ('Satellite Church Admin', 'satellite_admin', 'Satellite Admin') and satellite_church_id = (select satellite_church_id from public.profiles where id = auth.uid()))
   );
 
 -- Care Center Reports policies
@@ -1405,7 +1405,49 @@ create policy "Member attendance viewing"
   using (
     (select role from public.profiles where id = auth.uid()) in ('Super Admin', 'Senior Pastor', 'Church Administrator', 'Finance Officer') or
     ((select role from public.profiles where id = auth.uid()) = 'Care Pastor' and care_center_id = (select care_center_id from public.profiles where id = auth.uid())) or
-    ((select role from public.profiles where id = auth.uid()) = 'Satellite Church Admin' and satellite_church_id = (select satellite_church_id from public.profiles where id = auth.uid())) or
+    ((select role from public.profiles where id = auth.uid()) in ('Satellite Church Admin', 'satellite_admin', 'Satellite Admin') and satellite_church_id = (select satellite_church_id from public.profiles where id = auth.uid())) or
+    ((select role from public.profiles where id = auth.uid()) = 'Department Head' and department_id = (select department_id from public.profiles where id = auth.uid()))
+  );
+
+drop policy if exists "Member attendance writing" on public.member_attendance;
+create policy "Member attendance writing"
+  on public.member_attendance for all
+  using (
+    (select role from public.profiles where id = auth.uid()) in ('Super Admin', 'Church Administrator') or
+    ((select role from public.profiles where id = auth.uid()) = 'Care Pastor' and care_center_id = (select care_center_id from public.profiles where id = auth.uid())) or
+    ((select role from public.profiles where id = auth.uid()) in ('Satellite Church Admin', 'satellite_admin', 'Satellite Admin') and satellite_church_id = (select satellite_church_id from public.profiles where id = auth.uid())) or
+    ((select role from public.profiles where id = auth.uid()) = 'Department Head' and department_id = (select department_id from public.profiles where id = auth.uid()))
+  );
+
+-- Leader/Worker Attendance policies
+drop policy if exists "Leader worker attendance viewing" on public.leader_worker_attendance;
+create policy "Leader worker attendance viewing"
+  on public.leader_worker_attendance for select
+  using (auth.uid() is not null);
+
+drop policy if exists "Leader worker attendance writing" on public.leader_worker_attendance;
+create policy "Leader worker attendance writing"
+  on public.leader_worker_attendance for all
+  using (
+    (select role from public.profiles where id = auth.uid()) in ('Super Admin', 'Church Administrator') or
+    ((select role from public.profiles where id = auth.uid()) = 'Care Pastor' and care_center_id = (select care_center_id from public.profiles where id = auth.uid())) or
+    ((select role from public.profiles where id = auth.uid()) in ('Satellite Church Admin', 'satellite_admin', 'Satellite Admin') and satellite_church_id = (select satellite_church_id from public.profiles where id = auth.uid())) or
+    ((select role from public.profiles where id = auth.uid()) = 'Department Head' and department_id = (select department_id from public.profiles where id = auth.uid()))
+  );
+
+-- Attendance Sessions policies
+drop policy if exists "Attendance sessions viewing" on public.attendance_sessions;
+create policy "Attendance sessions viewing"
+  on public.attendance_sessions for select
+  using (auth.uid() is not null);
+
+drop policy if exists "Attendance sessions writing" on public.attendance_sessions;
+create policy "Attendance sessions writing"
+  on public.attendance_sessions for all
+  using (
+    (select role from public.profiles where id = auth.uid()) in ('Super Admin', 'Church Administrator') or
+    ((select role from public.profiles where id = auth.uid()) = 'Care Pastor' and care_center_id = (select care_center_id from public.profiles where id = auth.uid())) or
+    ((select role from public.profiles where id = auth.uid()) in ('Satellite Church Admin', 'satellite_admin', 'Satellite Admin') and satellite_church_id = (select satellite_church_id from public.profiles where id = auth.uid())) or
     ((select role from public.profiles where id = auth.uid()) = 'Department Head' and department_id = (select department_id from public.profiles where id = auth.uid()))
   );
 
