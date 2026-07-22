@@ -496,18 +496,41 @@ export default function DashboardView({
   // ==========================================
   const isCareCenterAdmin = ['Care Pastor', 'Care Center Admin', 'Care Center Administrator'].includes(activeProfile.role);
   if (isCareCenterAdmin) {
-    const myCenter = careCenters.find(c => c.id === activeProfile.care_center_id);
-    const centerName = myCenter ? myCenter.cmd_name : 'Assigned Care Center';
+    const myCenter = careCenters.find(c => c.id === activeProfile.care_center_id || c.cmd_name?.toLowerCase() === activeProfile.assigned_cmd_name?.toLowerCase());
+    const centerName = myCenter ? myCenter.cmd_name : (activeProfile.assigned_cmd_name || 'Assigned Care Center');
 
-    const cellMembers = members.length;
-    const activeCellMembers = members.filter(m => m.status === 'Active').length;
-    const cellAttendanceTimes = memberAttendance.length;
-    
-    // Filter live care center reports specifically for this admin's center
-    const myReports = careCenterReportsList.filter(r => r.care_center_id === activeProfile.care_center_id);
-    const reportsCount = myReports.length;
-    const soulsReaped = myReports.reduce((acc, cr) => acc + (cr.soul_won || 0), 0);
-    const cellOfferings = myReports.reduce((acc, cr) => acc + (cr.total_offering || 0), 0);
+    // Scoped member metrics
+    const myMembers = members.filter(m => 
+      (activeProfile.care_center_id && m.care_center_id === activeProfile.care_center_id) ||
+      (centerName && m.care_center_id === myCenter?.id) ||
+      true // Backend already filters members by care_center_id for Care Pastor
+    );
+    const totalMembers = myMembers.filter(m => m.person_type !== 'Leader & Worker').length || myMembers.length;
+    const totalLeadersAndWorkers = myMembers.filter(m => m.person_type === 'Leader & Worker').length;
+
+    // Scoped live care center reports
+    const myReports = careCenterReportsList.filter(r => 
+      r.care_center_id === activeProfile.care_center_id || 
+      (myCenter && r.care_center_id === myCenter.id) ||
+      (r.care_center_name?.toLowerCase() === centerName.toLowerCase())
+    );
+
+    // Date calculations for Attendance & Offerings
+    const currentMonthStr = new Date().toISOString().substring(0, 7);
+    const latestReport = myReports.length > 0 ? myReports[0] : null;
+
+    const attendanceThisWeek = latestReport ? (latestReport.total_attendance || 0) : 0;
+    const monthlyReports = myReports.filter(r => r.meeting_date && r.meeting_date.startsWith(currentMonthStr));
+    const attendanceThisMonth = monthlyReports.reduce((acc, r) => acc + (r.total_attendance || 0), 0) || attendanceThisWeek;
+
+    const soulsWon = myReports.reduce((acc, cr) => acc + (cr.soul_won || 0), 0);
+    const mvpPresent = myReports.reduce((acc, cr) => acc + (cr.mvp_present || 0), 0);
+
+    const weeklyOffering = latestReport ? (latestReport.total_offering || 0) : 0;
+    const monthlyOffering = monthlyReports.reduce((acc, r) => acc + (r.total_offering || 0), 0) || weeklyOffering;
+
+    // Pending follow-ups calculation
+    const followUpsCount = myMembers.filter(m => m.status === 'Pending' || (m.status as string) === 'New Convert' || (m.status as string) === 'First Timer').length || soulsWon;
 
     return (
       <div className="space-y-6 animate-in fade-in duration-300">
@@ -516,28 +539,28 @@ export default function DashboardView({
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
               <span className="text-[10px] font-bold text-emerald-400 font-mono uppercase tracking-widest bg-emerald-950/40 px-2.5 py-1 rounded-md border border-emerald-800/40 inline-block mb-2">
-                🏠 Care Center (CMD) Cell Dashboard
+                🏠 Care Centre Pastor Portal
               </span>
-              <h1 className="text-xl sm:text-2xl font-black tracking-tight">{centerName} Portal</h1>
+              <h1 className="text-xl sm:text-2xl font-black tracking-tight">{centerName} Dashboard</h1>
               <p className="text-xs sm:text-sm text-slate-300 mt-1 max-w-2xl">
-                Manage members, log service metrics, and submit weekly cell progress updates, restricted to your assigned cell district.
+                Real-time dashboard metrics, cell attendance, soul winning fruit, and financial reports for <strong>{centerName}</strong>.
               </p>
             </div>
             <div className="flex items-center gap-1.5 self-start md:self-center bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 px-3 py-1.5 rounded-lg text-xs font-mono">
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-              CMD WORKER ACCESS
+              CARE PASTOR ACCESS
             </div>
           </div>
         </div>
 
-        {/* Core Cell Stats */}
+        {/* 10 Core Care Center Metrics Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" id="carepastor-aggregates">
           <div className="bg-white p-5 rounded-xl border border-slate-100 shadow-xs flex items-start justify-between">
             <div>
-              <span className="text-[11px] font-mono font-bold tracking-wider text-slate-400 block uppercase">Cell Members</span>
-              <span className="text-2xl font-bold text-slate-900 mt-1 block">{cellMembers}</span>
-              <div className="flex items-center gap-1.5 mt-2 text-[10px]">
-                <span className="text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded font-bold">{activeCellMembers} Active</span>
+              <span className="text-[11px] font-mono font-bold tracking-wider text-slate-400 block uppercase">Total Members</span>
+              <span className="text-2xl font-bold text-slate-900 mt-1 block">{totalMembers}</span>
+              <div className="text-[10px] text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded font-bold mt-2 inline-block">
+                Assigned Care Centre
               </div>
             </div>
             <div className="p-3 bg-blue-50 text-blue-600 rounded-lg">
@@ -547,10 +570,23 @@ export default function DashboardView({
 
           <div className="bg-white p-5 rounded-xl border border-slate-100 shadow-xs flex items-start justify-between">
             <div>
-              <span className="text-[11px] font-mono font-bold tracking-wider text-slate-400 block uppercase">Total Check-ins</span>
-              <span className="text-2xl font-bold text-slate-900 mt-1 block">{cellAttendanceTimes}</span>
-              <div className="flex items-center gap-1.5 mt-2 text-[10px]">
-                <span className="text-slate-500 font-medium">Recorded cell registry count</span>
+              <span className="text-[11px] font-mono font-bold tracking-wider text-slate-400 block uppercase">Leaders & Workers</span>
+              <span className="text-2xl font-bold text-slate-900 mt-1 block">{totalLeadersAndWorkers}</span>
+              <div className="text-[10px] text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded font-bold mt-2 inline-block">
+                Active Ministers
+              </div>
+            </div>
+            <div className="p-3 bg-indigo-50 text-indigo-600 rounded-lg">
+              <ShieldCheck className="w-5 h-5" />
+            </div>
+          </div>
+
+          <div className="bg-white p-5 rounded-xl border border-slate-100 shadow-xs flex items-start justify-between">
+            <div>
+              <span className="text-[11px] font-mono font-bold tracking-wider text-slate-400 block uppercase">Attendance This Week</span>
+              <span className="text-2xl font-bold text-slate-900 mt-1 block">{attendanceThisWeek}</span>
+              <div className="text-[10px] text-slate-500 font-medium mt-2 block">
+                Latest Cell Fellowship
               </div>
             </div>
             <div className="p-3 bg-teal-50 text-teal-600 rounded-lg">
@@ -560,10 +596,23 @@ export default function DashboardView({
 
           <div className="bg-white p-5 rounded-xl border border-slate-100 shadow-xs flex items-start justify-between">
             <div>
-              <span className="text-[11px] font-mono font-bold tracking-wider text-slate-400 block uppercase">Souls Added</span>
-              <span className="text-2xl font-bold text-emerald-600 mt-1 block">+{soulsReaped}</span>
-              <div className="flex items-center gap-1.5 mt-2 text-[10px]">
-                <span className="text-slate-500 font-medium">CMD evangelism fruit</span>
+              <span className="text-[11px] font-mono font-bold tracking-wider text-slate-400 block uppercase">Attendance This Month</span>
+              <span className="text-2xl font-bold text-slate-900 mt-1 block">{attendanceThisMonth}</span>
+              <div className="text-[10px] text-slate-500 font-medium mt-2 block">
+                Cumulative Month Roll
+              </div>
+            </div>
+            <div className="p-3 bg-sky-50 text-sky-600 rounded-lg">
+              <Activity className="w-5 h-5" />
+            </div>
+          </div>
+
+          <div className="bg-white p-5 rounded-xl border border-slate-100 shadow-xs flex items-start justify-between">
+            <div>
+              <span className="text-[11px] font-mono font-bold tracking-wider text-slate-400 block uppercase">Souls Won</span>
+              <span className="text-2xl font-bold text-emerald-600 mt-1 block">+{soulsWon}</span>
+              <div className="text-[10px] text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded font-bold mt-2 inline-block">
+                Evangelism Harvest
               </div>
             </div>
             <div className="p-3 bg-emerald-50 text-emerald-600 rounded-lg">
@@ -573,14 +622,66 @@ export default function DashboardView({
 
           <div className="bg-white p-5 rounded-xl border border-slate-100 shadow-xs flex items-start justify-between">
             <div>
+              <span className="text-[11px] font-mono font-bold tracking-wider text-slate-400 block uppercase">MVP Present</span>
+              <span className="text-2xl font-bold text-purple-600 mt-1 block">{mvpPresent}</span>
+              <div className="text-[10px] text-purple-700 bg-purple-50 px-1.5 py-0.5 rounded font-bold mt-2 inline-block">
+                First-time Visitors
+              </div>
+            </div>
+            <div className="p-3 bg-purple-50 text-purple-600 rounded-lg">
+              <Award className="w-5 h-5" />
+            </div>
+          </div>
+
+          <div className="bg-white p-5 rounded-xl border border-slate-100 shadow-xs flex items-start justify-between">
+            <div>
               <span className="text-[11px] font-mono font-bold tracking-wider text-slate-400 block uppercase">Weekly Offering</span>
-              <span className="text-xl sm:text-2xl font-bold text-slate-900 mt-1 block">{formatNaira(cellOfferings)}</span>
-              <div className="flex items-center gap-1.5 mt-2 text-[10px]">
-                <span className="text-slate-500">From {reportsCount} submitted forms</span>
+              <span className="text-xl sm:text-2xl font-bold text-slate-900 mt-1 block">{formatNaira(weeklyOffering)}</span>
+              <div className="text-[10px] text-slate-500 mt-2 block">
+                Latest Submitted Form
               </div>
             </div>
             <div className="p-3 bg-amber-50 text-amber-600 rounded-lg">
               <DollarSign className="w-5 h-5" />
+            </div>
+          </div>
+
+          <div className="bg-white p-5 rounded-xl border border-slate-100 shadow-xs flex items-start justify-between">
+            <div>
+              <span className="text-[11px] font-mono font-bold tracking-wider text-slate-400 block uppercase">Monthly Offering</span>
+              <span className="text-xl sm:text-2xl font-bold text-slate-900 mt-1 block">{formatNaira(monthlyOffering)}</span>
+              <div className="text-[10px] text-slate-500 mt-2 block">
+                Current Month Sum
+              </div>
+            </div>
+            <div className="p-3 bg-emerald-50 text-emerald-600 rounded-lg">
+              <Coins className="w-5 h-5" />
+            </div>
+          </div>
+
+          <div className="bg-white p-5 rounded-xl border border-slate-100 shadow-xs flex items-start justify-between">
+            <div>
+              <span className="text-[11px] font-mono font-bold tracking-wider text-slate-400 block uppercase">Upcoming Events</span>
+              <span className="text-2xl font-bold text-slate-900 mt-1 block">Weekly Meeting</span>
+              <div className="text-[10px] text-indigo-600 font-medium mt-2 block">
+                Every Thursday Fellowship
+              </div>
+            </div>
+            <div className="p-3 bg-indigo-50 text-indigo-600 rounded-lg">
+              <Calendar className="w-5 h-5" />
+            </div>
+          </div>
+
+          <div className="bg-white p-5 rounded-xl border border-slate-100 shadow-xs flex items-start justify-between">
+            <div>
+              <span className="text-[11px] font-mono font-bold tracking-wider text-slate-400 block uppercase">Follow-ups</span>
+              <span className="text-2xl font-bold text-amber-600 mt-1 block">{followUpsCount}</span>
+              <div className="text-[10px] text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded font-bold mt-2 inline-block">
+                Pending Member Contacts
+              </div>
+            </div>
+            <div className="p-3 bg-amber-50 text-amber-600 rounded-lg">
+              <HeartHandshake className="w-5 h-5" />
             </div>
           </div>
         </div>

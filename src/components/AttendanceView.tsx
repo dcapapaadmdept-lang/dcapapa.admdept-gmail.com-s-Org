@@ -99,13 +99,21 @@ export default function AttendanceView({
   const isSatelliteAdmin = ['Satellite Church Admin', 'satellite_admin', 'Satellite Admin'].includes(activeProfile.role);
   const isSuperAdmin = ['Super Admin', 'super_admin', 'Senior Pastor', 'Church Administrator'].includes(activeProfile.role);
 
-  // Filter members based on logged-in Satellite Church context + Quick Search filter
+  const isCarePastor = ['Care Pastor', 'Care Center Admin', 'Care Center Administrator'].includes(activeProfile.role);
+
+  // Filter members based on logged-in Satellite Church or Care Center context + Quick Search filter
   const filteredTrackerMembers = React.useMemo(() => {
     let list = [...members];
     if (isSatelliteAdmin && activeProfile.satellite_church_id) {
       list = list.filter(m => m.satellite_church_id === activeProfile.satellite_church_id);
     } else if (selSat) {
       list = list.filter(m => m.satellite_church_id === selSat);
+    }
+
+    if (isCarePastor && activeProfile.care_center_id) {
+      list = list.filter(m => m.care_center_id === activeProfile.care_center_id);
+    } else if (selCenter) {
+      list = list.filter(m => m.care_center_id === selCenter);
     }
 
     if (memberSearch.trim()) {

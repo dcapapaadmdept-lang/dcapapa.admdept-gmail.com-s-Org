@@ -202,6 +202,7 @@ export default function App() {
   // 3.5 Real-Time Diagnostic States (Requirements 1, 2, 3, 4, 8, 9 & 10)
   const [membersQueryError, setMembersQueryError] = useState<string | null>(null);
   const [satelliteChurchesQueryError, setSatelliteChurchesQueryError] = useState<string | null>(null);
+  const [careCenterReportsQueryError, setCareCenterReportsQueryError] = useState<string | null>(null);
   const [totalSupabaseRecords, setTotalSupabaseRecords] = useState<number | null>(null);
   const [lastExecutedQuery, setLastExecutedQuery] = useState<string>('');
   const [startupTraces, setStartupTraces] = useState<StartupQueryTrace[]>([]);
@@ -289,6 +290,9 @@ export default function App() {
           if (tableName === 'satellite_churches') {
             setSatelliteChurchesQueryError(null);
           }
+          if (tableName === 'care_center_reports') {
+            setCareCenterReportsQueryError(null);
+          }
           return res;
         } catch (err: any) {
           console.warn(`[SYNC TABLE FALLBACK] Table '${tableName}' query '${queryName}' failed/timed out.`);
@@ -303,6 +307,9 @@ export default function App() {
           }
           if (tableName === 'satellite_churches') {
             setSatelliteChurchesQueryError(errMsg);
+          }
+          if (tableName === 'care_center_reports') {
+            setCareCenterReportsQueryError(errMsg);
           }
           return fallbackSelector();
         }
@@ -647,6 +654,7 @@ export default function App() {
     const profileToUse = activeProfile;
     if (!profileToUse) return;
     setMembersQueryError(null);
+    setCareCenterReportsQueryError(null);
     setStartupError(null);
 
     try {
@@ -655,6 +663,7 @@ export default function App() {
       console.error('[MANUAL REFRESH DIAL FAILURE] Error reloading:', err);
       const errMsg = err?.message || err?.details || JSON.stringify(err) || 'Database access restricted by Row-Level Security Rules';
       setMembersQueryError(errMsg);
+      setCareCenterReportsQueryError(errMsg);
     }
   };
 
@@ -678,7 +687,6 @@ export default function App() {
       'satellite_churches',
       'member_attendance',
       'department_attendance',
-      'care_center_reports',
       'satellite_reports',
       'cmd_reports',
       'finances',
@@ -748,6 +756,12 @@ export default function App() {
     return (
       <LoginScreen
         resolveProfile={resolveOrCreateUserProfile}
+        initialError={startupError}
+        onRetryBootstrap={() => {
+          setLoading(true);
+          setStartupError(null);
+          window.location.reload();
+        }}
         onAuthSuccess={(user, profile) => {
           setAuthenticatedUser(user);
           setActiveProfile(profile);
@@ -770,7 +784,7 @@ export default function App() {
   // Permission Checks for Navigation tabs visibility
   const showCmdTab = ['Super Admin', 'Admin', 'Senior Pastor', 'Church Administrator', 'Care Pastor', 'Finance Officer'].includes(safeActiveProfile.role);
   const showSatTab = ['Super Admin', 'Admin', 'Senior Pastor', 'Church Administrator', 'Satellite Church Admin', 'satellite_admin', 'Satellite Admin', 'Finance Officer'].includes(safeActiveProfile.role);
-  const showCareCenterTab = ['Super Admin', 'Admin', 'Senior Pastor', 'Church Administrator', 'Care Pastor', 'Care Center Admin', 'Care Center Administrator', 'Finance Officer'].includes(safeActiveProfile.role);
+  const showCareCenterTab = ['Super Admin', 'Admin', 'Senior Pastor', 'Church Administrator', 'Care Pastor', 'Care Center Admin', 'Care Center Administrator', 'Finance Officer', 'CMD', 'Church Ministry Director'].includes(safeActiveProfile.role);
   const showFinanceTab = ['Super Admin', 'Admin', 'Senior Pastor', 'Church Administrator', 'Satellite Church Admin', 'satellite_admin', 'Satellite Admin', 'Finance Officer'].includes(safeActiveProfile.role);
 
   const renderSidebarContent = (isMobile = false) => {
@@ -879,7 +893,9 @@ export default function App() {
           { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, tab: 'dashboard' },
           { id: 'members', label: 'Members', icon: Users, tab: 'members' },
           { id: 'attendance', label: 'Attendance', icon: CalendarCheck, tab: 'attendance' },
-          { id: 'care_center_reports', label: 'Reports', icon: Radio, tab: 'care_center_reports' },
+          { id: 'care_center_reports', label: 'Care Centre Reports', icon: FileSpreadsheet, tab: 'care_center_reports' },
+          { id: 'finance', label: 'Finance Ledger', icon: Coins, tab: 'finance' },
+          { id: 'my_church', label: 'My Care Centre', icon: Building, tab: 'my_church' },
           { id: 'profile', label: 'Profile', icon: User, tab: 'profile' }
         );
       } else if (isDept) {
@@ -1344,6 +1360,7 @@ export default function App() {
                   careCenters={careCenters}
                   careCenterReportsList={careCenterReportsList}
                   onRefresh={refreshDatabase}
+                  queryError={careCenterReportsQueryError}
                 />
               )}
 

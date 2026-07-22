@@ -7,16 +7,24 @@ import Logo from './Logo';
 interface LoginScreenProps {
   onAuthSuccess: (user: any, profile: Profile) => void;
   resolveProfile: (user: any) => Promise<Profile>;
+  initialError?: string | null;
+  onRetryBootstrap?: () => void;
 }
 
-export default function LoginScreen({ onAuthSuccess, resolveProfile }: LoginScreenProps) {
+export default function LoginScreen({ onAuthSuccess, resolveProfile, initialError, onRetryBootstrap }: LoginScreenProps) {
   const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(initialError || null);
   const [success, setSuccess] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (initialError) {
+      setError(initialError);
+    }
+  }, [initialError]);
 
   // Satellite Admin Self-Registration fields
   const [fullName, setFullName] = useState('');
@@ -348,6 +356,21 @@ CREATE POLICY "Allow internal read for authenticated workers"
                       <li>Your domain/origin is blocked by Supabase CORS settings.</li>
                       <li>Your internet service has blocked the connection (firewall/DNS).</li>
                     </ul>
+                    <div className="mt-3 flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (onRetryBootstrap) {
+                            onRetryBootstrap();
+                          } else {
+                            window.location.reload();
+                          }
+                        }}
+                        className="px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold text-[10px] uppercase tracking-wider rounded transition-all cursor-pointer shadow flex items-center gap-1"
+                      >
+                        <span>🔄 Retry Connection</span>
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>

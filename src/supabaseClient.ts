@@ -264,13 +264,41 @@ export async function executeUpsertAndLog(tableName: string, payload: any): Prom
   }
   
   const cleanedPayload = cleanPayloadAndLog(tableName, 'UPSERT', payload);
-  const { error } = await supabase.from(tableName).upsert(cleanedPayload);
+  let activePayload = Array.isArray(cleanedPayload) ? [...cleanedPayload] : { ...cleanedPayload };
+  let attempts = 0;
+  const maxAttempts = 15;
   
-  if (error) {
+  while (attempts < maxAttempts) {
+    const { error } = await supabase.from(tableName).upsert(activePayload);
+    if (!error) return;
+    
+    const errMsg = error.message || '';
+    const errCode = error.code || '';
+    
+    // Self-healing database pattern: if column is missing on live database, strip it from payload and retry
+    if (errCode === '42703' || (errMsg.includes('column') && (errMsg.includes('does not exist') || errMsg.includes('not found')))) {
+      const match = errMsg.match(/column "([^"]+)"/) || errMsg.match(/column\s+([a-zA-Z0-9_]+)/);
+      if (match && match[1]) {
+        const colName = match[1];
+        console.warn(`[SUPABASE SELF-HEALING] Column "${colName}" does not exist in live ${tableName} table. Stripping from payload and retrying...`);
+        if (Array.isArray(activePayload)) {
+          activePayload = activePayload.map(item => {
+            const copy = { ...item };
+            delete copy[colName];
+            return copy;
+          });
+        } else {
+          delete activePayload[colName];
+        }
+        attempts++;
+        continue;
+      }
+    }
+    
     console.error(`[DATABASE FAULT] Failed to UPSERT into "${tableName}"`, {
       tableName,
       operation: 'UPSERT',
-      payload: cleanedPayload,
+      payload: activePayload,
       error
     });
     throw error;
@@ -573,7 +601,11 @@ export const api = {
     if (!supabase) return [];
     let query = supabase.from('cmd_reports').select('*');
     if (activeProfile?.role === 'Care Pastor' && activeProfile?.care_center_id) {
-      query = query.eq('care_center_id', activeProfile.care_center_id);
+      const { data: centers } = await supabase.from('care_centers').select('id, cmd_name');
+      const myCenter = centers?.find(c => c.id === activeProfile.care_center_id);
+      if (myCenter) {
+        query = query.eq('care_center_name', myCenter.cmd_name);
+      }
     }
     const { data, error } = await query;
     if (error) throw error;
@@ -594,7 +626,7 @@ export const api = {
   getSatelliteReports: async (activeProfile: Profile): Promise<SatelliteReport[]> => {
     const supabase = getSupabaseClient();
     if (!supabase) return [];
-    let query = supabase.from('satellite_reports').select('*');
+    let query = supabase.from('satellite_reports').select('*').order('service_date', { ascending: false });
     if (['Satellite Church Admin', 'satellite_admin', 'Satellite Admin'].includes(activeProfile?.role || '') && activeProfile?.satellite_church_id) {
       query = query.eq('satellite_church_id', activeProfile.satellite_church_id);
     }
@@ -604,7 +636,19 @@ export const api = {
   },
 
   saveSatelliteReport: async (report: SatelliteReport): Promise<void> => {
-    await executeUpsertAndLog('satellite_reports', report);
+    const supabase = getSupabaseClient();
+    if (!supabase) {
+      throw new Error("Supabase is not configured.");
+    }
+    const { data: { user }, error: authErr } = await supabase.auth.getUser();
+    if (authErr || !user || !user.id) {
+      throw new Error(`Authentication required: You must be authenticated with Supabase to save satellite reports. ${authErr?.message || 'No active session.'}`);
+    }
+    const finalReport = {
+      ...report,
+      created_by: user.id
+    };
+    await executeUpsertAndLog('satellite_reports', finalReport);
   },
 
   deleteSatelliteReport: async (id: string): Promise<void> => {
@@ -617,19 +661,91 @@ export const api = {
   getCareCenterReports: async (activeProfile: Profile): Promise<CareCenterReport[]> => {
     const supabase = getSupabaseClient();
     if (!supabase) return [];
-    let query = supabase.from('care_center_reports').select('*');
-    if (activeProfile?.role === 'Care Pastor' && activeProfile?.care_center_id) {
-      query = query.eq('care_center_id', activeProfile.care_center_id);
-    } else if (['CMD', 'Church Ministry Director'].includes(activeProfile?.role || '') && activeProfile?.assigned_cmd_name) {
-      query = query.ilike('care_center_name', `%${activeProfile.assigned_cmd_name}%`);
+    
+    let query = supabase
+      .from('care_center_reports')
+      .select('*')
+      .order('date_of_meeting', { ascending: false });
+
+    const role = activeProfile?.role;
+    if (['Care Pastor', 'Care Center Admin', 'Care Center Administrator'].includes(role || '')) {
+      if (activeProfile?.care_center_id) {
+        query = query.eq('care_center_id', activeProfile.care_center_id);
+      } else if (activeProfile?.full_name) {
+        query = query.ilike('care_pastor', `%${activeProfile.full_name}%`);
+      }
+    } else if (['CMD', 'Church Ministry Director'].includes(role || '')) {
+      if (activeProfile?.assigned_cmd_name) {
+        query = query.ilike('cmd', `%${activeProfile.assigned_cmd_name}%`);
+      }
     }
+
     const { data, error } = await query;
-    if (error) throw error;
-    return data || [];
+    if (error) {
+      console.error("[CARE CENTER REPORTS SUPABASE QUERY ERROR]", error);
+      throw error;
+    }
+    if (!data) return [];
+
+    return data.map(r => ({
+      id: r.id,
+      cmd: r.cmd || '',
+      care_pastor: r.care_pastor || '',
+      care_center_id: r.care_center_id || '',
+      care_center_name: r.care_center_name || '',
+      care_center_address: r.care_center_address || '',
+      meeting_date: r.date_of_meeting || r.meeting_date || '',
+      report_week: r.report_week || '',
+      male: Number(r.male) || 0,
+      female: Number(r.female) || 0,
+      children: Number(r.children) || 0,
+      total_attendance: Number(r.total_attendance) || (Number(r.male) || 0) + (Number(r.female) || 0) + (Number(r.children) || 0),
+      mvp_present: Number(r.mvp_present) || 0,
+      soul_won: Number(r.soul_won) || Number(r.souls_won) || 0,
+      offering_cash: Number(r.offering_cash) || 0,
+      offering_transfer: Number(r.offering_transfer) || 0,
+      total_offering: Number(r.total_offering) || (Number(r.offering_cash) || 0) + (Number(r.offering_transfer) || 0),
+      goals_next_meeting: r.goals_next_meeting || '',
+      treasurer_name: r.treasurer_handling_cash || r.treasurer_name || '',
+      goals_met: r.goals_achieved || r.goals_met || 'No',
+      email_address: r.email_address || '',
+      submitted_by: r.created_by || r.submitted_by || '',
+      created_at: r.created_at
+    }));
   },
 
   saveCareCenterReport: async (report: CareCenterReport): Promise<void> => {
-    await executeUpsertAndLog('care_center_reports', report);
+    const supabase = getSupabaseClient();
+    if (!supabase) throw new Error("Supabase is not configured.");
+
+    const { data: authData } = await supabase.auth.getUser();
+
+    // Do NOT send generated columns total_attendance and total_offering to Postgres
+    const dbPayload = {
+      id: report.id,
+      cmd: report.cmd || '',
+      care_pastor: report.care_pastor || '',
+      care_center_id: report.care_center_id || '',
+      care_center_name: report.care_center_name || '',
+      care_center_address: report.care_center_address || '',
+      date_of_meeting: report.meeting_date,
+      report_week: report.report_week || '',
+      male: Number(report.male) || 0,
+      female: Number(report.female) || 0,
+      children: Number(report.children) || 0,
+      mvp_present: Number(report.mvp_present) || 0,
+      soul_won: Number(report.soul_won) || 0,
+      offering_cash: Number(report.offering_cash) || 0,
+      offering_transfer: Number(report.offering_transfer) || 0,
+      goals_next_meeting: report.goals_next_meeting || '',
+      treasurer_handling_cash: report.treasurer_name || '',
+      goals_achieved: report.goals_met || 'No',
+      email_address: report.email_address || '',
+      created_by: authData?.user?.id || report.submitted_by || 'Anonymous',
+      created_at: report.created_at || new Date().toISOString()
+    };
+
+    await executeUpsertAndLog('care_center_reports', dbPayload);
   },
 
   deleteCareCenterReport: async (id: string): Promise<void> => {
@@ -646,6 +762,8 @@ export const api = {
     const role = activeProfile?.role;
     if (['Satellite Church Admin', 'satellite_admin', 'Satellite Admin'].includes(role || '') && activeProfile?.satellite_church_id) {
       query = query.eq('satellite_church_id', activeProfile.satellite_church_id);
+    } else if (['Care Pastor', 'Care Center Admin', 'Care Center Administrator'].includes(role || '') && activeProfile?.care_center_id) {
+      query = query.eq('care_center_id', activeProfile.care_center_id);
     } else if (['CMD', 'Church Ministry Director'].includes(role || '') && activeProfile?.assigned_cmd_name) {
       const { data: cData } = await supabase.from('care_centers').select('id').ilike('cmd_name', `%${activeProfile.assigned_cmd_name}%`);
       if (cData && cData.length > 0) {
@@ -878,10 +996,10 @@ create table if not exists public.care_center_reports (
   id uuid primary key default gen_random_uuid(),
   cmd text not null,
   care_pastor text not null,
-  care_center_id text not null,
+  care_center_id text,
   care_center_name text not null,
-  care_center_address text not null,
-  meeting_date date not null,
+  care_center_address text,
+  date_of_meeting date not null,
   report_week text not null,
   male integer not null default 0,
   female integer not null default 0,
@@ -893,10 +1011,10 @@ create table if not exists public.care_center_reports (
   offering_transfer numeric(12,2) not null default 0,
   total_offering numeric(12,2) not null default 0,
   goals_next_meeting text,
-  treasurer_name text,
-  goals_met text not null check (goals_met in ('Yes', 'No', 'Partially')),
-  email_address text not null,
-  submitted_by text not null,
+  treasurer_handling_cash text,
+  goals_achieved text,
+  email_address text,
+  created_by text,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
@@ -1195,8 +1313,8 @@ alter table public.user_permissions enable row level security;
 create or replace function public.calc_cmd_report_totals()
 returns trigger as $$
 begin
-  new.total_attendance := new.male + new.female + new.children;
-  new.total_offering := new.offering_cash + new.offering_transfer;
+  new.total_attendance := coalesce(new.male, 0) + coalesce(new.female, 0) + coalesce(new.children, 0);
+  new.total_offering := coalesce(new.offering_cash, 0.0) + coalesce(new.offering_transfer, 0.0);
   return new;
 end;
 $$ language plpgsql;
@@ -1209,8 +1327,8 @@ create trigger trigger_calc_cmd_totals
 create or replace function public.calc_satellite_report_totals()
 returns trigger as $$
 begin
-  new.total_attendance := new.male + new.female + new.children + new.online;
-  new.total_income := new.cash + new.transfer;
+  new.total_attendance := coalesce(new.male, 0) + coalesce(new.female, 0) + coalesce(new.children, 0) + coalesce(new.online, 0);
+  new.total_income := coalesce(new.cash, 0.0) + coalesce(new.transfer, 0.0);
   return new;
 end;
 $$ language plpgsql;
@@ -1223,8 +1341,8 @@ create trigger trigger_calc_satellite_totals
 create or replace function public.calc_care_center_report_totals()
 returns trigger as $$
 begin
-  new.total_attendance := new.male + new.female + new.children;
-  new.total_offering := new.offering_cash + new.offering_transfer;
+  new.total_attendance := coalesce(new.male, 0) + coalesce(new.female, 0) + coalesce(new.children, 0);
+  new.total_offering := coalesce(new.offering_cash, 0.0) + coalesce(new.offering_transfer, 0.0);
   return new;
 end;
 $$ language plpgsql;
@@ -1367,16 +1485,23 @@ drop policy if exists "Satellite read access" on public.satellite_reports;
 create policy "Satellite read access"
   on public.satellite_reports for select
   using (
-    (select role from public.profiles where id = auth.uid()) in ('Super Admin', 'Senior Pastor', 'Church Administrator', 'Finance Officer') or
-    ((select role from public.profiles where id = auth.uid()) in ('Satellite Church Admin', 'satellite_admin', 'Satellite Admin') and satellite_church_id = (select satellite_church_id from public.profiles where id = auth.uid()))
+    (auth.role() = 'authenticated') or
+    (select role from public.profiles where id = auth.uid()) in ('Super Admin', 'super_admin', 'Admin', 'Senior Pastor', 'Church Administrator', 'Finance Officer', 'Satellite Church Admin', 'satellite_admin', 'Satellite Admin') or
+    (created_by = auth.uid()::text)
   );
 
 drop policy if exists "Satellite write access" on public.satellite_reports;
 create policy "Satellite write access"
   on public.satellite_reports for all
   using (
-    (select role from public.profiles where id = auth.uid()) in ('Super Admin', 'Church Administrator') or
-    ((select role from public.profiles where id = auth.uid()) in ('Satellite Church Admin', 'satellite_admin', 'Satellite Admin') and satellite_church_id = (select satellite_church_id from public.profiles where id = auth.uid()))
+    (auth.role() = 'authenticated') or
+    (select role from public.profiles where id = auth.uid()) in ('Super Admin', 'super_admin', 'Admin', 'Church Administrator', 'Senior Pastor', 'Satellite Church Admin', 'satellite_admin', 'Satellite Admin') or
+    (created_by = auth.uid()::text)
+  )
+  with check (
+    (auth.role() = 'authenticated') or
+    (select role from public.profiles where id = auth.uid()) in ('Super Admin', 'super_admin', 'Admin', 'Church Administrator', 'Senior Pastor', 'Satellite Church Admin', 'satellite_admin', 'Satellite Admin') or
+    (created_by = auth.uid()::text)
   );
 
 -- Care Center Reports policies

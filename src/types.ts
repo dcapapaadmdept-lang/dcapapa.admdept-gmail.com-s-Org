@@ -197,8 +197,8 @@ export interface SatelliteReport {
   souls: number;
   cash: number;
   transfer: number;
-  total_attendance: number; // calculated: male + female + children + online
-  total_income: number; // calculated: cash + transfer
+  total_attendance?: number; // calculated: male + female + children + online
+  total_income?: number; // calculated: cash + transfer
   treasurer_nam: string;
   people_called_for_service: number;
   goal_for_next_midweek_service: string;

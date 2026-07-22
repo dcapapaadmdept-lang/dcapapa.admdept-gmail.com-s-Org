@@ -830,7 +830,7 @@ export default function CmdReportsView({
 
       {activeProfile.role === 'Super Admin' && (
         <DiagnosticsPanel
-          tableName="care_center_reports"
+          tableName="cmd_reports"
           rowsInDb={careCenterReportsList.length}
           rowsLoaded={filteredCareCenterReports.length}
           lastQueryTime="14ms"

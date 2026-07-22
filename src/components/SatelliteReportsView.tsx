@@ -23,7 +23,8 @@ import {
   Trash2,
   X,
   Info,
-  CheckCircle
+  CheckCircle,
+  Loader2
 } from 'lucide-react';
 import jsPDF from 'jspdf';
 import { drawPdfLogo } from './Logo';
@@ -93,6 +94,8 @@ export default function SatelliteReportsView({
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitSuccess, setSubmitSuccess] = useState<string | null>(null);
   const [editingReport, setEditingReport] = useState<SatelliteReport | null>(null);
+  const [isSaving, setIsSaving] = useState<boolean>(false);
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
 
   // Requirement 9: Refresh automatically when new branches are added
   useEffect(() => {
@@ -140,6 +143,21 @@ export default function SatelliteReportsView({
   const totalAttendance = maleCount + femaleCount + childrenCount + onlineCount;
   const totalIncome = cashCollected + transferCollected;
 
+  const generateUUID = (): string => {
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+      return crypto.randomUUID();
+    }
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+      const r = (Math.random() * 16) | 0;
+      const v = c === 'x' ? r : (r & 0x3) | 0x8;
+      return v.toString(16);
+    });
+  };
+
+  const isValidUUID = (val: string): boolean => {
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
+  };
+
   const handleAutofillMetadata = () => {
     if (targetSat) {
       setRegPastor(targetSat.pastor_nam);
@@ -166,6 +184,7 @@ export default function SatelliteReportsView({
     setTreasurerName(rep.treasurer_nam);
     setPeopleCalled(rep.people_called_for_service || 0);
     setGoalNextMidweek(rep.goal_for_next_midweek_service || '');
+    setActiveTab('submit');
     
     // Smooth scroll to top where the form resides
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -183,18 +202,116 @@ export default function SatelliteReportsView({
     }
   };
 
+  const validateForm = (): boolean => {
+    const errors: Record<string, string> = {};
+    
+    if (!targetSat) {
+      errors.selectedSatId = 'Please select a valid Satellite Church.';
+    }
+    if (!serviceDate) {
+      errors.serviceDate = 'Service date is required.';
+    }
+    if (!serviceType) {
+      errors.serviceType = 'Service category type is required.';
+    }
+    if (!timeStarted) {
+      errors.timeStarted = 'Time Started is required.';
+    }
+    if (!timeEnded) {
+      errors.timeEnded = 'Time Ended is required.';
+    }
+    if (maleCount === undefined || maleCount === null || isNaN(maleCount) || maleCount < 0) {
+      errors.maleCount = 'Male count must be a non-negative number.';
+    }
+    if (femaleCount === undefined || femaleCount === null || isNaN(femaleCount) || femaleCount < 0) {
+      errors.femaleCount = 'Female count must be a non-negative number.';
+    }
+    if (childrenCount === undefined || childrenCount === null || isNaN(childrenCount) || childrenCount < 0) {
+      errors.childrenCount = 'Children count must be a non-negative number.';
+    }
+    if (onlineCount === undefined || onlineCount === null || isNaN(onlineCount) || onlineCount < 0) {
+      errors.onlineCount = 'Online stream must be a non-negative number.';
+    }
+    if (mvpCount === undefined || mvpCount === null || isNaN(mvpCount) || mvpCount < 0) {
+      errors.mvpCount = 'MVP must be a non-negative number.';
+    }
+    if (soulsCount === undefined || soulsCount === null || isNaN(soulsCount) || soulsCount < 0) {
+      errors.soulsCount = 'Souls Won must be a non-negative number.';
+    }
+    if (cashCollected === undefined || cashCollected === null || isNaN(cashCollected) || cashCollected < 0) {
+      errors.cashCollected = 'Offering Cash must be a non-negative number.';
+    }
+    if (transferCollected === undefined || transferCollected === null || isNaN(transferCollected) || transferCollected < 0) {
+      errors.transferCollected = 'Offering Transfer / POS must be a non-negative number.';
+    }
+    if (!treasurerName || !treasurerName.trim()) {
+      errors.treasurerName = 'Treasurer Name is required.';
+    }
+    if (peopleCalled === undefined || peopleCalled === null || isNaN(peopleCalled) || peopleCalled < 0) {
+      errors.peopleCalled = 'People Called must be a non-negative number.';
+    }
+    if (!goalNextMidweek || !goalNextMidweek.trim()) {
+      errors.goalNextMidweek = 'Goal for Next Midweek Service is required.';
+    }
+
+    setFormErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
   const handleReportSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSaving) return;
+
     setSubmitError(null);
     setSubmitSuccess(null);
+    setFormErrors({});
+
     if (!targetSat) {
       const errMsg = 'Error: Please select a valid Satellite Church before submitting a report.';
       setSubmitError(errMsg);
       return;
     }
 
-    const payload: SatelliteReport = {
-      id: editingReport ? editingReport.id : 'rep-sat-' + Math.floor(100000 + Math.random() * 900000),
+    // Trigger full form validation
+    const isValid = validateForm();
+    if (!isValid) {
+      setSubmitError('Form validation failed. Please review and correct the highlighted fields.');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+
+    setIsSaving(true);
+
+    const supabase = getSupabaseClient();
+    if (!supabase) {
+      setSubmitError('Database connection not configured.');
+      setIsSaving(false);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+
+    let authUser: any = null;
+    try {
+      const { data: authData, error: authErr } = await supabase.auth.getUser();
+      if (!authErr && authData?.user) {
+        authUser = authData.user;
+      }
+    } catch (e) {
+      console.warn('[AUTH GET USER EXCEPTION]', e);
+    }
+
+    if (!authUser || !authUser.id) {
+      setSubmitError('Authentication required: You must be logged in as an authenticated Supabase user to submit a Satellite Report. Anonymous requests are blocked by database security policies.');
+      setIsSaving(false);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+
+    const createdByUuid = authUser.id;
+
+    // Prepare payload completely omitting PostgreSQL auto-generated columns (total_attendance, total_income)
+    const payload: Partial<SatelliteReport> = {
+      id: editingReport ? editingReport.id : generateUUID(),
       satellite_church_id: targetSat.id,
       church_name: targetSat.church_name,
       church_loc: targetSat.church_loc,
@@ -202,55 +319,65 @@ export default function SatelliteReportsView({
       admin_nam: targetSat.admin_nam,
       service_date: serviceDate,
       service_type: serviceType,
-      specify: specify || undefined,
+      specify: specify?.trim() || undefined,
       time_started: timeStarted,
       time_ended: timeEnded,
-      male: maleCount,
-      female: femaleCount,
-      children: childrenCount,
-      online: onlineCount,
-      mvp: mvpCount,
-      souls: soulsCount,
-      cash: cashCollected,
-      transfer: transferCollected,
-      total_attendance: totalAttendance,
-      total_income: totalIncome,
-      treasurer_nam: treasurerName || targetSat.treasurer_nam,
-      people_called_for_service: peopleCalled,
-      goal_for_next_midweek_service: goalNextMidweek,
-      created_by: editingReport ? editingReport.created_by : activeProfile.full_name,
+      male: Number(maleCount) || 0,
+      female: Number(femaleCount) || 0,
+      children: Number(childrenCount) || 0,
+      online: Number(onlineCount) || 0,
+      mvp: Number(mvpCount) || 0,
+      souls: Number(soulsCount) || 0,
+      cash: Number(cashCollected) || 0,
+      transfer: Number(transferCollected) || 0,
+      treasurer_nam: treasurerName.trim() || targetSat.treasurer_nam,
+      people_called_for_service: Number(peopleCalled) || 0,
+      goal_for_next_midweek_service: goalNextMidweek.trim(),
+      created_by: createdByUuid,
       created_at: editingReport ? editingReport.created_at : new Date().toISOString()
     };
 
     console.log(`[DATABASE OP] Attempting ${editingReport ? 'UPDATE' : 'INSERT'} on "satellite_reports"`, {
+      tableName: 'satellite_reports',
       operation: editingReport ? 'UPDATE' : 'INSERT',
       payload: payload
     });
 
     try {
-      await api.saveSatelliteReport(payload);
-      setSubmitSuccess(editingReport ? 'Satellite Church report updated successfully!' : 'Satellite Church report processed and saved successfully!');
+      await api.saveSatelliteReport(payload as SatelliteReport);
+      setSubmitSuccess(editingReport ? 'Satellite Church report updated successfully!' : 'Satellite Report submitted successfully.');
       
-      // Reset form states
+      // Reset form states cleanly
       setEditingReport(null);
-      // Reset to defaults
       setServiceDate(new Date().toISOString().split('T')[0]);
-      setSpecify('First Service Check');
-      setMaleCount(30);
-      setFemaleCount(45);
-      setChildrenCount(15);
-      setOnlineCount(10);
-      setMvpCount(4);
-      setSoulsCount(3);
-      setCashCollected(40000);
-      setTransferCollected(85000);
-      setPeopleCalled(12);
-      setGoalNextMidweek('Launch neighborhood study outlining to hit 130 attendees.');
+      setSpecify('');
+      setTimeStarted('08:30');
+      setTimeEnded('11:30');
+      setMaleCount(0);
+      setFemaleCount(0);
+      setChildrenCount(0);
+      setOnlineCount(0);
+      setMvpCount(0);
+      setSoulsCount(0);
+      setCashCollected(0);
+      setTransferCollected(0);
+      setTreasurerName(targetSat?.treasurer_nam || '');
+      setPeopleCalled(0);
+      setGoalNextMidweek('');
+      setFormErrors({});
       
       onRefresh();
     } catch (err: any) {
-      console.error('[DATABASE FAULT] Failed to save "satellite_reports"', err);
-      setSubmitError(`Database Save Failed on 'satellite_reports': ${err.message || JSON.stringify(err)}`);
+      console.error('[DATABASE FAULT] Failed to save "satellite_reports"', {
+        tableName: 'satellite_reports',
+        payload: payload,
+        error: err
+      });
+      const errorMsg = err?.message || err?.details || err?.hint || (typeof err === 'object' ? JSON.stringify(err) : String(err));
+      setSubmitError(`Database Save Failed on 'satellite_reports': ${errorMsg}`);
+    } finally {
+      setIsSaving(false);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     }
   };
 
@@ -637,15 +764,14 @@ Dominion City Lekki Satellite,10 Lekki Phase 1,Pastor Kola Olawale,Brother James
 
                 <form onSubmit={handleReportSubmit} className="space-y-4">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    
-                    {/* Select active satellite */}
+                            {/* Select active satellite */}
                     <div>
                       <label className="text-[11px] font-bold text-slate-700 block mb-1">Satellite Church *</label>
                       <select
                         disabled={isSatAdmin}
                         value={isSatAdmin ? (mySatelliteId || '') : selectedSatId}
                         onChange={(e) => setSelectedSatId(e.target.value)}
-                        className="w-full px-3 py-2 border border-slate-200 text-xs rounded-lg font-bold"
+                        className={`w-full px-3 py-2 border text-xs rounded-lg font-bold ${formErrors.selectedSatId ? 'border-rose-500 ring-1 ring-rose-500 bg-rose-50/10' : 'border-slate-200'}`}
                       >
                         {isSatAdmin ? (
                           <option value={mySatelliteId || ''}>{satelliteChurches.find(s=>s.id === mySatelliteId)?.church_name || 'My Satellite Church'}</option>
@@ -653,6 +779,9 @@ Dominion City Lekki Satellite,10 Lekki Phase 1,Pastor Kola Olawale,Brother James
                           satelliteChurches.map(sc => <option key={sc.id} value={sc.id}>{sc.church_name}</option>)
                         )}
                       </select>
+                      {formErrors.selectedSatId && (
+                        <p className="text-[10px] text-rose-600 mt-1 font-semibold" id="err-selectedSatId">{formErrors.selectedSatId}</p>
+                      )}
                       <button
                         type="button"
                         onClick={handleAutofillMetadata}
@@ -670,8 +799,11 @@ Dominion City Lekki Satellite,10 Lekki Phase 1,Pastor Kola Olawale,Brother James
                         required
                         value={serviceDate}
                         onChange={(e) => setServiceDate(e.target.value)}
-                        className="w-full px-3 py-2 border border-slate-200 text-xs rounded-lg font-semibold"
+                        className={`w-full px-3 py-2 border text-xs rounded-lg font-semibold ${formErrors.serviceDate ? 'border-rose-500 ring-1 ring-rose-500 bg-rose-50/10' : 'border-slate-200'}`}
                       />
+                      {formErrors.serviceDate && (
+                        <p className="text-[10px] text-rose-600 mt-1 font-semibold" id="err-serviceDate">{formErrors.serviceDate}</p>
+                      )}
                     </div>
 
                     {/* Service Type */}
@@ -680,13 +812,16 @@ Dominion City Lekki Satellite,10 Lekki Phase 1,Pastor Kola Olawale,Brother James
                       <select
                         value={serviceType}
                         onChange={(e) => setServiceType(e.target.value)}
-                        className="w-full px-3 py-2 border border-slate-250 text-xs rounded-lg bg-white"
+                        className={`w-full px-3 py-2 border text-xs rounded-lg bg-white ${formErrors.serviceType ? 'border-rose-500 ring-1 ring-rose-500 bg-rose-50/10' : 'border-slate-250'}`}
                       >
                         <option value="Sunday Service">Sunday Service</option>
                         <option value="Midweek Service">Midweek Service</option>
                         <option value="Special Youth meeting">Special Youth meeting</option>
                         <option value="DCLM vigilance program">DCLM vigilance program</option>
                       </select>
+                      {formErrors.serviceType && (
+                        <p className="text-[10px] text-rose-600 mt-1 font-semibold" id="err-serviceType">{formErrors.serviceType}</p>
+                      )}
                     </div>
 
                     {/* Specific Name */}
@@ -709,8 +844,11 @@ Dominion City Lekki Satellite,10 Lekki Phase 1,Pastor Kola Olawale,Brother James
                         required
                         value={timeStarted}
                         onChange={(e) => setTimeStarted(e.target.value)}
-                        className="w-full px-3 py-2 border border-slate-200 text-xs rounded-lg font-mono font-bold"
+                        className={`w-full px-3 py-2 border text-xs rounded-lg font-mono font-bold ${formErrors.timeStarted ? 'border-rose-500 ring-1 ring-rose-500 bg-rose-50/10' : 'border-slate-200'}`}
                       />
+                      {formErrors.timeStarted && (
+                        <p className="text-[10px] text-rose-600 mt-1 font-semibold" id="err-timeStarted">{formErrors.timeStarted}</p>
+                      )}
                     </div>
 
                     {/* Time Ended */}
@@ -721,8 +859,11 @@ Dominion City Lekki Satellite,10 Lekki Phase 1,Pastor Kola Olawale,Brother James
                         required
                         value={timeEnded}
                         onChange={(e) => setTimeEnded(e.target.value)}
-                        className="w-full px-3 py-2 border border-slate-200 text-xs rounded-lg font-mono font-bold"
+                        className={`w-full px-3 py-2 border text-xs rounded-lg font-mono font-bold ${formErrors.timeEnded ? 'border-rose-500 ring-1 ring-rose-500 bg-rose-50/10' : 'border-slate-200'}`}
                       />
+                      {formErrors.timeEnded && (
+                        <p className="text-[10px] text-rose-600 mt-1 font-semibold" id="err-timeEnded">{formErrors.timeEnded}</p>
+                      )}
                     </div>
                   </div>
 
@@ -739,8 +880,11 @@ Dominion City Lekki Satellite,10 Lekki Phase 1,Pastor Kola Olawale,Brother James
                           min={0}
                           value={maleCount}
                           onChange={(e) => setMaleCount(parseInt(e.target.value) || 0)}
-                          className="w-full px-3 py-2 border border-slate-200 text-xs rounded-lg font-bold"
+                          className={`w-full px-3 py-2 border text-xs rounded-lg font-bold ${formErrors.maleCount ? 'border-rose-500 ring-1 ring-rose-500 bg-rose-50/10' : 'border-slate-200'}`}
                         />
+                        {formErrors.maleCount && (
+                          <p className="text-[10px] text-rose-600 mt-1 font-semibold">{formErrors.maleCount}</p>
+                        )}
                       </div>
                       <div>
                         <label className="text-[10px] font-bold text-slate-400 block mb-1">Female *</label>
@@ -750,8 +894,11 @@ Dominion City Lekki Satellite,10 Lekki Phase 1,Pastor Kola Olawale,Brother James
                           min={0}
                           value={femaleCount}
                           onChange={(e) => setFemaleCount(parseInt(e.target.value) || 0)}
-                          className="w-full px-3 py-2 border border-slate-200 text-xs rounded-lg font-bold"
+                          className={`w-full px-3 py-2 border text-xs rounded-lg font-bold ${formErrors.femaleCount ? 'border-rose-500 ring-1 ring-rose-500 bg-rose-50/10' : 'border-slate-200'}`}
                         />
+                        {formErrors.femaleCount && (
+                          <p className="text-[10px] text-rose-600 mt-1 font-semibold">{formErrors.femaleCount}</p>
+                        )}
                       </div>
                       <div>
                         <label className="text-[10px] font-bold text-slate-400 block mb-1">Children *</label>
@@ -761,8 +908,11 @@ Dominion City Lekki Satellite,10 Lekki Phase 1,Pastor Kola Olawale,Brother James
                           min={0}
                           value={childrenCount}
                           onChange={(e) => setChildrenCount(parseInt(e.target.value) || 0)}
-                          className="w-full px-3 py-2 border border-slate-200 text-xs rounded-lg font-bold"
+                          className={`w-full px-3 py-2 border text-xs rounded-lg font-bold ${formErrors.childrenCount ? 'border-rose-500 ring-1 ring-rose-500 bg-rose-50/10' : 'border-slate-200'}`}
                         />
+                        {formErrors.childrenCount && (
+                          <p className="text-[10px] text-rose-600 mt-1 font-semibold">{formErrors.childrenCount}</p>
+                        )}
                       </div>
                       <div>
                         <label className="text-[10px] font-bold text-slate-400 block mb-1">Online stream *</label>
@@ -772,8 +922,11 @@ Dominion City Lekki Satellite,10 Lekki Phase 1,Pastor Kola Olawale,Brother James
                           min={0}
                           value={onlineCount}
                           onChange={(e) => setOnlineCount(parseInt(e.target.value) || 0)}
-                          className="w-full px-3 py-2 border border-slate-300 text-xs rounded-lg font-bold text-indigo-700 bg-indigo-50/50"
+                          className={`w-full px-3 py-2 border text-xs rounded-lg font-bold text-indigo-700 bg-indigo-50/50 ${formErrors.onlineCount ? 'border-rose-500 ring-1 ring-rose-500 bg-rose-50/10' : 'border-slate-300'}`}
                         />
+                        {formErrors.onlineCount && (
+                          <p className="text-[10px] text-rose-600 mt-1 font-semibold">{formErrors.onlineCount}</p>
+                        )}
                       </div>
                       <div>
                         <label className="text-[10px] font-bold text-slate-400 block mb-1">MVP *</label>
@@ -783,8 +936,11 @@ Dominion City Lekki Satellite,10 Lekki Phase 1,Pastor Kola Olawale,Brother James
                           min={0}
                           value={mvpCount}
                           onChange={(e) => setMvpCount(parseInt(e.target.value) || 0)}
-                          className="w-full px-3 py-2 border border-slate-200 text-xs rounded-lg font-bold"
+                          className={`w-full px-3 py-2 border text-xs rounded-lg font-bold ${formErrors.mvpCount ? 'border-rose-500 ring-1 ring-rose-500 bg-rose-50/10' : 'border-slate-200'}`}
                         />
+                        {formErrors.mvpCount && (
+                          <p className="text-[10px] text-rose-600 mt-1 font-semibold">{formErrors.mvpCount}</p>
+                        )}
                       </div>
                       <div>
                         <label className="text-[10px] font-bold text-slate-400 block mb-1">Souls Won *</label>
@@ -794,8 +950,11 @@ Dominion City Lekki Satellite,10 Lekki Phase 1,Pastor Kola Olawale,Brother James
                           min={0}
                           value={soulsCount}
                           onChange={(e) => setSoulsCount(parseInt(e.target.value) || 0)}
-                          className="w-full px-3 py-2 border border-slate-200 text-xs rounded-lg font-bold"
+                          className={`w-full px-3 py-2 border text-xs rounded-lg font-bold ${formErrors.soulsCount ? 'border-rose-500 ring-1 ring-rose-500 bg-rose-50/10' : 'border-slate-200'}`}
                         />
+                        {formErrors.soulsCount && (
+                          <p className="text-[10px] text-rose-600 mt-1 font-semibold">{formErrors.soulsCount}</p>
+                        )}
                       </div>
                     </div>
 
@@ -820,9 +979,12 @@ Dominion City Lekki Satellite,10 Lekki Phase 1,Pastor Kola Olawale,Brother James
                             min={0}
                             value={cashCollected}
                             onChange={(e) => setCashCollected(parseFloat(e.target.value) || 0)}
-                            className="w-full pl-7 pr-3 py-2 border border-slate-200 text-xs rounded-lg font-bold"
+                            className={`w-full pl-7 pr-3 py-2 border text-xs rounded-lg font-bold ${formErrors.cashCollected ? 'border-rose-500 ring-1 ring-rose-500 bg-rose-50/10' : 'border-slate-200'}`}
                           />
                         </div>
+                        {formErrors.cashCollected && (
+                          <p className="text-[10px] text-rose-600 mt-1 font-semibold">{formErrors.cashCollected}</p>
+                        )}
                       </div>
 
                       <div>
@@ -835,9 +997,12 @@ Dominion City Lekki Satellite,10 Lekki Phase 1,Pastor Kola Olawale,Brother James
                             min={0}
                             value={transferCollected}
                             onChange={(e) => setTransferCollected(parseFloat(e.target.value) || 0)}
-                            className="w-full pl-7 pr-3 py-2 border border-slate-200 text-xs rounded-lg font-bold"
+                            className={`w-full pl-7 pr-3 py-2 border text-xs rounded-lg font-bold ${formErrors.transferCollected ? 'border-rose-500 ring-1 ring-rose-500 bg-rose-50/10' : 'border-slate-200'}`}
                           />
                         </div>
+                        {formErrors.transferCollected && (
+                          <p className="text-[10px] text-rose-600 mt-1 font-semibold">{formErrors.transferCollected}</p>
+                        )}
                       </div>
                     </div>
 
@@ -861,8 +1026,11 @@ Dominion City Lekki Satellite,10 Lekki Phase 1,Pastor Kola Olawale,Brother James
                           value={treasurerName}
                           onChange={(e) => setTreasurerName(e.target.value)}
                           placeholder="Sister Rachel Benson"
-                          className="w-full px-3 py-2 border border-slate-200 text-xs rounded-lg font-medium"
+                          className={`w-full px-3 py-2 border text-xs rounded-lg font-medium ${formErrors.treasurerName ? 'border-rose-500 ring-1 ring-rose-500 bg-rose-50/10' : 'border-slate-200'}`}
                         />
+                        {formErrors.treasurerName && (
+                          <p className="text-[10px] text-rose-600 mt-1 font-semibold">{formErrors.treasurerName}</p>
+                        )}
                       </div>
 
                       <div>
@@ -873,8 +1041,11 @@ Dominion City Lekki Satellite,10 Lekki Phase 1,Pastor Kola Olawale,Brother James
                           min={0}
                           value={peopleCalled}
                           onChange={(e) => setPeopleCalled(parseInt(e.target.value) || 0)}
-                          className="w-full px-3 py-2 border border-slate-200 text-xs rounded-lg font-medium"
+                          className={`w-full px-3 py-2 border text-xs rounded-lg font-medium ${formErrors.peopleCalled ? 'border-rose-500 ring-1 ring-rose-500 bg-rose-50/10' : 'border-slate-200'}`}
                         />
+                        {formErrors.peopleCalled && (
+                          <p className="text-[10px] text-rose-600 mt-1 font-semibold">{formErrors.peopleCalled}</p>
+                        )}
                       </div>
 
                       <div className="sm:col-span-2">
@@ -885,8 +1056,11 @@ Dominion City Lekki Satellite,10 Lekki Phase 1,Pastor Kola Olawale,Brother James
                           value={goalNextMidweek}
                           onChange={(e) => setGoalNextMidweek(e.target.value)}
                           placeholder="Describe target reach plans..."
-                          className="w-full px-3 py-2 border border-slate-200 text-xs rounded-lg font-medium"
+                          className={`w-full px-3 py-2 border text-xs rounded-lg font-medium ${formErrors.goalNextMidweek ? 'border-rose-500 ring-1 ring-rose-500 bg-rose-50/10' : 'border-slate-200'}`}
                         />
+                        {formErrors.goalNextMidweek && (
+                          <p className="text-[10px] text-rose-600 mt-1 font-semibold">{formErrors.goalNextMidweek}</p>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -894,9 +1068,17 @@ Dominion City Lekki Satellite,10 Lekki Phase 1,Pastor Kola Olawale,Brother James
                   <div className="border-t border-slate-150 pt-4 flex items-center justify-end gap-2 text-xs font-semibold">
                     <button
                       type="submit"
-                      className="w-full py-2.5 bg-slate-900 border border-slate-950 text-white rounded-xl hover:bg-slate-800 shadow-xs transition text-center cursor-pointer font-bold"
+                      disabled={isSaving}
+                      className={`w-full py-2.5 text-white rounded-xl shadow-xs transition text-center cursor-pointer font-bold ${isSaving ? 'bg-slate-700 border-slate-700 cursor-not-allowed opacity-80' : 'bg-slate-900 border-slate-950 hover:bg-slate-800'}`}
                     >
-                      {editingReport ? 'Update Report Card' : 'File Satellite Report'}
+                      {isSaving ? (
+                        <span className="flex items-center justify-center gap-1.5">
+                          <Loader2 className="w-4 h-4 animate-spin text-white" />
+                          Saving Report...
+                        </span>
+                      ) : (
+                        editingReport ? 'Update Report Card' : 'File Satellite Report'
+                      )}
                     </button>
                   </div>
                 </form>

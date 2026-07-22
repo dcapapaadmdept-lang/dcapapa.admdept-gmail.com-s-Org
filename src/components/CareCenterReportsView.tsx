@@ -15,18 +15,21 @@ interface CareCenterReportsViewProps {
   careCenters: CareCenter[];
   careCenterReportsList: CareCenterReport[];
   onRefresh: () => void;
+  queryError?: string | null;
 }
 
 export default function CareCenterReportsView({
   activeProfile,
   careCenters,
   careCenterReportsList,
-  onRefresh
+  onRefresh,
+  queryError
 }: CareCenterReportsViewProps) {
   
   // Realtime state for keeping track of live subscriptions
   const [reports, setReports] = useState<CareCenterReport[]>(careCenterReportsList);
   const [dbError, setDbError] = useState<string | null>(null);
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [isSyncing, setIsSyncing] = useState(false);
   const [rtStatus, setRtStatus] = useState<'DISCONNECTED' | 'CONNECTED'>('DISCONNECTED');
 
@@ -55,9 +58,7 @@ export default function CareCenterReportsView({
   const [filterCareCenterId, setFilterCareCenterId] = useState('');
   const [filterCarePastor, setFilterCarePastor] = useState('');
   const [filterWeek, setFilterWeek] = useState('');
-  const [filterMonth, setFilterMonth] = useState('');
-  const [filterQuarter, setFilterQuarter] = useState('');
-  const [filterYear, setFilterYear] = useState('');
+  const [filterCmd, setFilterCmd] = useState('');
 
   // Form Fields State
   const [formCmd, setFormCmd] = useState('');
@@ -172,7 +173,9 @@ export default function CareCenterReportsView({
       'Church Administrator',
       'Care Pastor',
       'Care Center Admin',
-      'Care Center Administrator'
+      'Care Center Administrator',
+      'CMD',
+      'Church Ministry Director'
     ].includes(activeProfile.role);
   }, [activeProfile]);
 
@@ -238,44 +241,60 @@ export default function CareCenterReportsView({
     }).format(amount);
   };
 
-  // Apply search filtering
+  // Apply search and field-level filtering across all report attributes
   const filteredReports = useMemo(() => {
-    return reports.filter((r) => {
-      // 1. Role Access boundaries
-      if (isAssignedOnly && activeProfile.care_center_id) {
-        if (r.care_center_id !== activeProfile.care_center_id) {
-          return false;
-        }
+    return reports.filter(r => {
+      // General Search Filter (CMD, Care Pastor, Care Center Name, Treasurer, Email, Report Week)
+      if (ccSearchTerm.trim()) {
+        const q = ccSearchTerm.toLowerCase().trim();
+        const matchesQuery =
+          (r.cmd && r.cmd.toLowerCase().includes(q)) ||
+          (r.care_pastor && r.care_pastor.toLowerCase().includes(q)) ||
+          (r.care_center_name && r.care_center_name.toLowerCase().includes(q)) ||
+          (r.care_center_address && r.care_center_address.toLowerCase().includes(q)) ||
+          (r.treasurer_name && r.treasurer_name.toLowerCase().includes(q)) ||
+          (r.email_address && r.email_address.toLowerCase().includes(q)) ||
+          (r.report_week && r.report_week.toLowerCase().includes(q)) ||
+          (r.meeting_date && r.meeting_date.toLowerCase().includes(q));
+        if (!matchesQuery) return false;
       }
 
-      // 2. Date Range filters
+      // Role-based filtering for Care Pastor / Care Center Admin
+      if (isAssignedOnly && activeProfile.care_center_id) {
+        const assignedCenter = careCenters.find(c => c.id === activeProfile.care_center_id);
+        const matchesId = r.care_center_id === activeProfile.care_center_id;
+        const matchesName = assignedCenter && r.care_center_name?.toLowerCase() === assignedCenter.cmd_name?.toLowerCase();
+        if (!matchesId && !matchesName) return false;
+      }
+
+      // Field specific dropdown / input filters
+      if (filterCmd.trim() && !r.cmd?.toLowerCase().includes(filterCmd.toLowerCase().trim())) return false;
+      if (filterCarePastor.trim() && !r.care_pastor?.toLowerCase().includes(filterCarePastor.toLowerCase().trim())) return false;
+      if (filterCareCenterId) {
+        const selCenter = careCenters.find(c => c.id === filterCareCenterId);
+        const matchesId = r.care_center_id === filterCareCenterId;
+        const matchesName = selCenter && r.care_center_name?.toLowerCase() === selCenter.cmd_name?.toLowerCase();
+        if (!matchesId && !matchesName) return false;
+      }
+      if (filterWeek && r.report_week !== filterWeek) return false;
       if (filterStartDate && r.meeting_date < filterStartDate) return false;
       if (filterEndDate && r.meeting_date > filterEndDate) return false;
 
-      // 3. Care Center filter
-      if (filterCareCenterId && r.care_center_id !== filterCareCenterId) return false;
-
-      // 4. Care Pastor filter
-      if (filterCarePastor && !(r.care_pastor || '').toLowerCase().includes(filterCarePastor.toLowerCase())) return false;
-
-      // 5. Week filter
-      if (filterWeek && r.report_week !== filterWeek) return false;
-
-      // 6. Month, Quarter, Year filters
-      if (r.meeting_date) {
-        const date = new Date(r.meeting_date);
-        const y = date.getFullYear().toString();
-        const m = (date.getMonth() + 1).toString(); // "1" - "12"
-        const q = Math.ceil((date.getMonth() + 1) / 3).toString(); // "1" - "4"
-
-        if (filterYear && y !== filterYear) return false;
-        if (filterMonth && m !== filterMonth) return false;
-        if (filterQuarter && q !== filterQuarter) return false;
-      }
-
       return true;
     });
-  }, [reports, isAssignedOnly, activeProfile, filterStartDate, filterEndDate, filterCareCenterId, filterCarePastor, filterWeek, filterMonth, filterQuarter, filterYear]);
+  }, [
+    reports, 
+    ccSearchTerm, 
+    filterCmd, 
+    filterCarePastor, 
+    filterCareCenterId, 
+    filterWeek, 
+    filterStartDate, 
+    filterEndDate, 
+    isAssignedOnly, 
+    activeProfile, 
+    careCenters
+  ]);
 
   // Dashboard summary stats metrics derived from active files list
   const metrics = useMemo(() => {
@@ -312,6 +331,7 @@ export default function CareCenterReportsView({
   const handleOpenCreateForm = () => {
     setEditingReport(null);
     setFormCmd('CMD-APAPA-01');
+    setFormErrors({});
     
     if (allowedCareCenters.length > 0) {
       const defaultCenter = allowedCareCenters[0];
@@ -341,6 +361,7 @@ export default function CareCenterReportsView({
   // Populate Edit form values
   const handleOpenEditForm = (rep: CareCenterReport) => {
     setEditingReport(rep);
+    setFormErrors({});
     setFormCmd(rep.cmd);
     setFormCareCenterId(rep.care_center_id);
     setFormMeetingDate(rep.meeting_date);
@@ -361,19 +382,33 @@ export default function CareCenterReportsView({
   // Format and submit form
   const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formCmd.trim() || !formCareCenterId || !formMeetingDate) {
-      alert('Please fill out all required fields: CMD number, meeting date, and care center location.');
+    
+    // Strict internal form validation
+    const errors: Record<string, string> = {};
+    if (!formCmd.trim()) {
+      errors.formCmd = 'CMD Code is required.';
+    }
+    if (!formCareCenterId) {
+      errors.formCareCenterId = 'Please select a registered Care Center from the dropdown.';
+    }
+    if (!formMeetingDate) {
+      errors.formMeetingDate = 'Meeting Date is required.';
+    }
+
+    if (Object.keys(errors).length > 0) {
+      setFormErrors(errors);
       return;
     }
 
     const center = careCenters.find(c => c.id === formCareCenterId);
     if (!center) {
-      alert('Error matching registered Care Center. Please select an option from the dropdown.');
+      setFormErrors({ formCareCenterId: 'Selected Care Center was not found in the registers.' });
       return;
     }
 
     setIsSyncing(true);
     setDbError(null);
+    setFormErrors({});
 
     const reportPayload: CareCenterReport = {
       id: editingReport ? editingReport.id : (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 11)),
@@ -397,7 +432,7 @@ export default function CareCenterReportsView({
       treasurer_name: formTreasurerName.trim() || center.treasurer_name || 'Treasurer Officer',
       goals_met: formGoalsMet,
       email_address: formEmailAddress.trim() || center.email_address || 'administrative@dominioncity.org',
-      submitted_by: `${activeProfile.full_name} (${activeProfile.role})`,
+      submitted_by: activeProfile.full_name,
       created_at: editingReport ? editingReport.created_at : new Date().toISOString()
     };
 
@@ -953,14 +988,14 @@ Dominion City Apapa`;
       {activeSubTab === 'reports' && (
         <>
           {/* DATABASE HEALTH & RLS DIAGNOSTICS DEEP CHECK */}
-      {dbError && (
+      {(dbError || queryError) && (
         <div className="bg-rose-50 border border-rose-200 rounded-xl p-4 text-rose-800 text-xs flex items-start gap-3">
           <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
           <div className="space-y-1">
-            <span className="font-extrabold text-rose-900 block text-xs uppercase tracking-wider">Supabase write transaction failed</span>
-            <p className="leading-relaxed"><strong>Error details:</strong> {dbError}</p>
+            <span className="font-extrabold text-rose-900 block text-xs uppercase tracking-wider">Database Operation Error</span>
+            <p className="leading-relaxed"><strong>Error details:</strong> {dbError || queryError}</p>
             <p className="text-[11px] text-rose-600 pt-1 leading-relaxed">
-              If Row-Level Security is active on your <code className="text-rose-900 font-bold bg-rose-100 px-1 rounded">care_center_reports</code> table but you have not loaded writing policies for Care stakeholders, SQL inserts will abort. Rerun the setup SQL schema in the SQL tab.
+              If Row-Level Security is active on your <code className="text-rose-900 font-bold bg-rose-100 px-1 rounded">cmd_reports</code> table but you have not loaded writing policies for Care stakeholders, SQL queries or inserts will abort. Rerun the setup SQL schema in the SQL tab.
             </p>
           </div>
         </div>
@@ -1045,7 +1080,8 @@ Dominion City Apapa`;
             <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showFilters ? 'rotate-180' : ''}`} />
           </button>
           
-          {(filterStartDate || filterEndDate || filterCareCenterId || filterCarePastor || filterWeek || filterMonth || filterQuarter || filterYear) && (
+          {/* Reset button only shows when any of the allowed filters is active */}
+          {(filterStartDate || filterEndDate || filterCareCenterId || filterCarePastor || filterWeek || filterCmd) && (
             <button
               type="button"
               onClick={() => {
@@ -1054,9 +1090,7 @@ Dominion City Apapa`;
                 setFilterCareCenterId('');
                 setFilterCarePastor('');
                 setFilterWeek('');
-                setFilterMonth('');
-                setFilterQuarter('');
-                setFilterYear('');
+                setFilterCmd('');
               }}
               className="text-[11px] font-bold text-rose-600 hover:text-rose-800 transition flex items-center gap-1 cursor-pointer"
             >
@@ -1068,7 +1102,7 @@ Dominion City Apapa`;
 
         {/* Filtering Form Elements */}
         {showFilters && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 text-xs pt-2 border-t border-slate-100">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 text-xs pt-2 border-t border-slate-100 animate-in fade-in duration-200">
             
             <div className="space-y-1">
               <label className="text-[11px] font-bold text-slate-700">Filter Care Center</label>
@@ -1082,6 +1116,17 @@ Dominion City Apapa`;
                   <option key={c.id} value={c.id}>{c.cmd_name}</option>
                 ))}
               </select>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[11px] font-bold text-slate-700">CMD Code / Name Search</label>
+              <input
+                type="text"
+                placeholder="Search CMD code or Center Name..."
+                value={filterCmd}
+                onChange={e => setFilterCmd(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 text-slate-800 focus:bg-white focus:outline-indigo-500"
+              />
             </div>
 
             <div className="space-y-1">
@@ -1108,58 +1153,6 @@ Dominion City Apapa`;
                 <option value="Week 3">Week 3</option>
                 <option value="Week 4">Week 4</option>
                 <option value="Week 5">Week 5</option>
-              </select>
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-[11px] font-bold text-slate-700">Year Filter</label>
-              <select
-                value={filterYear}
-                onChange={e => setFilterYear(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 text-slate-800 focus:bg-white focus:outline-indigo-500"
-              >
-                <option value="">Any Year</option>
-                <option value="2025">2025</option>
-                <option value="2026">2026</option>
-                <option value="2027">2027</option>
-              </select>
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-[11px] font-bold text-slate-700">Month Filter</label>
-              <select
-                value={filterMonth}
-                onChange={e => setFilterMonth(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 text-slate-800 focus:bg-white focus:outline-indigo-500"
-              >
-                <option value="">Any Month</option>
-                <option value="1">January (1)</option>
-                <option value="2">February (2)</option>
-                <option value="3">March (3)</option>
-                <option value="4">April (4)</option>
-                <option value="5">May (5)</option>
-                <option value="6">June (6)</option>
-                <option value="7">July (7)</option>
-                <option value="8">August (8)</option>
-                <option value="9">September (9)</option>
-                <option value="10">October (10)</option>
-                <option value="11">November (11)</option>
-                <option value="12">December (12)</option>
-              </select>
-            </div>
-
-            <div className="space-y-1">
-              <label className="text-[11px] font-bold text-slate-700">Quarter Filter</label>
-              <select
-                value={filterQuarter}
-                onChange={e => setFilterQuarter(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 text-slate-800 focus:bg-white focus:outline-indigo-500"
-              >
-                <option value="">Any Quarter</option>
-                <option value="1">Q1 (Jan - Mar)</option>
-                <option value="2">Q2 (Apr - Jun)</option>
-                <option value="3">Q3 (Jul - Sep)</option>
-                <option value="4">Q4 (Oct - Dec)</option>
               </select>
             </div>
 
@@ -1228,8 +1221,15 @@ Dominion City Apapa`;
                       placeholder="e.g. CMD-APAPA-01"
                       value={formCmd}
                       onChange={e => setFormCmd(e.target.value)}
-                      className="w-full bg-white border border-slate-200 rounded-lg p-2.5 text-slate-900 font-semibold focus:outline-indigo-500"
+                      className={`w-full border rounded-lg p-2.5 text-slate-900 font-semibold focus:outline-indigo-500 ${
+                        formErrors.formCmd 
+                          ? 'border-rose-500 bg-rose-50/50 focus:outline-rose-500' 
+                          : 'bg-white border-slate-200'
+                      }`}
                     />
+                    {formErrors.formCmd && (
+                      <span className="text-[10px] text-rose-600 font-bold block mt-1 animate-pulse">{formErrors.formCmd}</span>
+                    )}
                   </div>
 
                   <div className="space-y-1">
@@ -1240,13 +1240,20 @@ Dominion City Apapa`;
                       value={formCareCenterId}
                       onChange={e => handleCareCenterSelect(e.target.value)}
                       required
-                      className="w-full bg-white border border-slate-200 rounded-lg p-2.5 text-slate-900 focus:outline-indigo-500 font-semibold"
+                      className={`w-full border rounded-lg p-2.5 text-slate-900 focus:outline-indigo-500 font-semibold ${
+                        formErrors.formCareCenterId 
+                          ? 'border-rose-500 bg-rose-50/50 focus:outline-rose-500' 
+                          : 'bg-white border-slate-200'
+                      }`}
                     >
                       <option value="">-- Choose Registered Center --</option>
                       {allowedCareCenters.map(c => (
                         <option key={c.id} value={c.id}>{c.cmd_name}</option>
                       ))}
                     </select>
+                    {formErrors.formCareCenterId && (
+                      <span className="text-[10px] text-rose-600 font-bold block mt-1 animate-pulse">{formErrors.formCareCenterId}</span>
+                    )}
                   </div>
 
                   {(() => {
@@ -1281,8 +1288,15 @@ Dominion City Apapa`;
                       required
                       value={formMeetingDate}
                       onChange={e => setFormMeetingDate(e.target.value)}
-                      className="w-full bg-white border border-slate-200 rounded-lg p-2.5 text-slate-900 focus:outline-indigo-500"
+                      className={`w-full border rounded-lg p-2.5 text-slate-900 focus:outline-indigo-500 ${
+                        formErrors.formMeetingDate 
+                          ? 'border-rose-500 bg-rose-50/50 focus:outline-rose-500' 
+                          : 'bg-white border-slate-200'
+                      }`}
                     />
+                    {formErrors.formMeetingDate && (
+                      <span className="text-[10px] text-rose-600 font-bold block mt-1 animate-pulse">{formErrors.formMeetingDate}</span>
+                    )}
                   </div>
 
                   <div className="space-y-1">
@@ -2094,7 +2108,7 @@ Dominion City Apapa`;
 
       {activeSubTab === 'reports' && activeProfile.role === 'Super Admin' && (
         <DiagnosticsPanel
-          tableName="care_center_reports"
+          tableName="cmd_reports"
           rowsInDb={careCenterReportsList.length}
           rowsLoaded={careCenterReportsList.length}
           lastQueryTime="35ms"

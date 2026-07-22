@@ -295,11 +295,19 @@ export default function SupabaseHealthCheckView({ activeProfile, onRefreshAll, s
     }
   };
 
+  const safeAlert = (msg: string) => {
+    try {
+      window.alert(msg);
+    } catch (e) {
+      console.warn("[IFRAME ALERT BLOCK] Suppressed modal window alert:", msg, e);
+    }
+  };
+
   const handleCreateAdminProfile = async () => {
     setIsRunningTest(true);
     const client = getSupabaseClient();
     if (!client || !authUserInfo?.id) {
-      alert("Unable to create profile: Client or Authenticated User session is missing.");
+      safeAlert("Unable to create profile: Client or Authenticated User session is missing.");
       setIsRunningTest(false);
       return;
     }
@@ -316,15 +324,15 @@ export default function SupabaseHealthCheckView({ activeProfile, onRefreshAll, s
         });
         
       if (error) {
-        alert(`Profile creation failed: ${error.message}`);
+        safeAlert(`Profile creation failed: ${error.message}`);
       } else {
-        alert(`Success! Profile row inserted as Super Admin. Re-running diagnostics...`);
+        safeAlert(`Success! Profile row inserted as Super Admin. Re-running diagnostics...`);
         await runDeepVerification();
         await runConnectionDiagnostics();
         onRefreshAll(); // Reload global state
       }
     } catch (err: any) {
-      alert(`Exception during insertion: ${err.message || JSON.stringify(err)}`);
+      safeAlert(`Exception during insertion: ${err.message || JSON.stringify(err)}`);
     } finally {
       setIsRunningTest(false);
     }
@@ -415,7 +423,7 @@ export default function SupabaseHealthCheckView({ activeProfile, onRefreshAll, s
     let sanitizedKey = customKey.trim();
 
     if (!sanitizedUrl || !sanitizedKey) {
-      alert('Please output correct URL and anon auth keys first.');
+      safeAlert('Please output correct URL and anon auth keys first.');
       return;
     }
 
@@ -449,7 +457,7 @@ export default function SupabaseHealthCheckView({ activeProfile, onRefreshAll, s
   const handleApplyAutoCleanEnv = () => {
     // If the configured raw values are already in the database config, let's clean them automatically!
     if (!dbConfig.isConfigured) {
-      alert('No credentials configured yet to auto-sanitize.');
+      safeAlert('No credentials configured yet to auto-sanitize.');
       return;
     }
 
